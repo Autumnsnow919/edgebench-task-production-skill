@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import hashlib
 
 import topify_common as common
 import topify_seed
@@ -90,7 +91,33 @@ def load(path: str | Path) -> dict:
     }
 
 
-def discover(scan_roots: list[str | Path]) -> dict:
+def _legacy_id(campaign: Path, scan_root: Path) -> str:
+    relative = campaign.relative_to(scan_root).parts
+    text = "-".join(part.lower() for part in relative if part)
+    text = re.sub(r"[^a-z0-9-]+", "-", text).strip("-") or "campaign"
+    return ("legacy-" + text)[:70] + "-" + hashlib.sha256(str(campaign).encode()).hexdigest()[:8]
+
+
+def _legacy_benchmark(campaign: Path, default: str) -> str:
+    try:
+        value = common.load_json(campaign / "campaign.json")
+        categories = set(value.get("config", {}).get("category_targets", {}))
+        if categories == {
+            "systems-software-engineering", "scientific-ml", "professional-knowledge-work",
+            "combinatorial-optimization", "formal-math-theorem-proving", "interactive-games-simulators",
+        }:
+            return "EdgeBench"
+    except (common.PipelineError, OSError, ValueError, TypeError):
+        pass
+    return default
+
+
+def discover(
+    scan_roots: list[str | Path],
+    adopt_legacy: bool = False,
+    dedup_root: str | Path | None = None,
+    legacy_benchmark: str = "Unclassified",
+) -> dict:
     """Discover stamped campaigns below explicit production scan roots."""
     if not scan_roots:
         raise common.PipelineError("at least one scan root is required")
@@ -100,6 +127,28 @@ def discover(scan_roots: list[str | Path]) -> dict:
         root = Path(raw_root).absolute()
         if root.is_symlink() or not root.is_dir():
             raise common.PipelineError(f"scan root is not a directory: {root}")
+        if adopt_legacy:
+            import topify_supervisor
+            for campaign_json in sorted(root.rglob("campaign.json")):
+                campaign = campaign_json.parent
+                if (campaign / "supervision/supervisor-stamp.json").exists():
+                    continue
+                try:
+                    topify_seed.load_campaign(campaign)
+                except (common.PipelineError, OSError, ValueError, TypeError):
+                    continue
+                supervisor_id = _legacy_id(campaign, root)
+                benchmark = _legacy_benchmark(campaign, legacy_benchmark)
+                topify_supervisor.initialize(
+                    campaign, mode="dual", dedup_root=dedup_root or (root / ".edgebench-dedup"),
+                    supervisor_id=supervisor_id, benchmark=benchmark,
+                )
+                stamp_path = campaign / "supervision/supervisor-stamp.json"
+                stamp = common.load_json(stamp_path)
+                common.write_latest_json(stamp_path, {
+                    **stamp, "status": "legacy-adopted", "needs_owner_review": True,
+                    "adopted_at": common.utc_now(),
+                })
         for stamp_path in sorted(root.rglob("supervision/supervisor-stamp.json")):
             if stamp_path.is_symlink() or not stamp_path.is_file():
                 continue

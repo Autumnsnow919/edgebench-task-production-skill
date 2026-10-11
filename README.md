@@ -110,6 +110,10 @@ python3 edgebench-task-generator/scripts/topify_pipeline.py \
   --benchmark EdgeBench --dedup-root /var/lib/edgebench/dedup-global
 ```
 
+Older campaigns can be migrated by adding `--adopt-legacy` to the Web scan
+command. They appear as `needs_owner_review` until the owner confirms their
+Benchmark and supervisor identity.
+
 Use `rehearsal` mode for production-line tests. Rehearsal artifacts are private
 and never count as Seed promotion, formal task delivery, model rollout or
 customer acceptance.

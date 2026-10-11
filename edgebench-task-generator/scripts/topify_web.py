@@ -75,11 +75,15 @@ class ConsoleState:
         supervisor_token_file: str | Path | None = None,
         registry_file: str | Path | None = None,
         scan_roots: list[str | Path] | None = None,
+        adopt_legacy: bool = False,
+        dedup_root: str | Path | None = None,
+        legacy_benchmark: str = "Unclassified",
     ):
         self.tokens = {}
         self.contexts = {}
         if registry_file is not None or scan_roots:
-            registry = topify_registry.load(registry_file) if registry_file is not None else topify_registry.discover(scan_roots or [])
+            registry = (topify_registry.load(registry_file) if registry_file is not None else
+                        topify_registry.discover(scan_roots or [], adopt_legacy, dedup_root, legacy_benchmark))
             owner_token = owner_token or _read_token_file(registry.get("owner_token_file"), "registry owner_token_file")
             for item in registry["supervisors"]:
                 token = _read_token_file(item.get("supervisor_token_file"), f"{item['supervisor_id']} supervisor token")
@@ -421,13 +425,17 @@ def serve(
     supervisor_token_file: str | Path | None = None,
     registry_file: str | Path | None = None,
     scan_roots: list[str | Path] | None = None,
+    adopt_legacy: bool = False,
+    dedup_root: str | Path | None = None,
+    legacy_benchmark: str = "Unclassified",
 ) -> tuple[dict, int]:
     if type(port) is not int or not 1 <= port <= 65535:
         raise common.PipelineError("web port must be between 1 and 65535")
     owner_token = owner_token or _read_token_file(owner_token_file, "owner_token_file")
     supervisor_token = supervisor_token or _read_token_file(supervisor_token_file, "supervisor_token_file")
     state = ConsoleState(campaign, owner_token, supervisor_token,
-                         owner_token_file, supervisor_token_file, registry_file, scan_roots)
+                         owner_token_file, supervisor_token_file, registry_file, scan_roots,
+                         adopt_legacy, dedup_root, legacy_benchmark)
     server = ConsoleServer((host, port), state)
     report = {
         "status": "running",

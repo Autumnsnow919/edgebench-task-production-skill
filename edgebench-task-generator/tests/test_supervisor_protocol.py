@@ -177,6 +177,21 @@ class SupervisorProtocolTests(unittest.TestCase):
                 fingerprint_file=self.fingerprint,
             )
 
+    def test_scan_can_adopt_legacy_campaign_into_a_watermark(self):
+        legacy_root = self.root / "legacy-root"
+        legacy_root.mkdir()
+        legacy_campaign = legacy_root / "old-campaign"
+        config = Path(__file__).resolve().parents[1] / "examples/campaign-config.json"
+        topify_seed.initialize_campaign(legacy_campaign, config)
+        discovered = topify_registry.discover(
+            [legacy_root], adopt_legacy=True,
+            dedup_root=legacy_root / "global-dedup",
+        )
+        self.assertEqual(len(discovered["supervisors"]), 1)
+        stamp = json.loads((legacy_campaign / "supervision/supervisor-stamp.json").read_text())
+        self.assertEqual(stamp["status"], "legacy-adopted")
+        self.assertTrue(stamp["needs_owner_review"])
+
 
 if __name__ == "__main__":
     unittest.main()

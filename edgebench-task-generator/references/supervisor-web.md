@@ -24,6 +24,12 @@ python3 edgebench-task-generator/scripts/topify_pipeline.py \
   --owner-token-file /etc/edgebench/owner.token
 ```
 
+For older campaigns that predate the watermark protocol, add
+`--adopt-legacy --dedup-root /var/lib/edgebench/dedup-global`. The scanner
+recognizes only valid Topify campaign structures, creates a stamp, and marks it
+`legacy-adopted / needs_owner_review`; it does not silently treat arbitrary
+task directories as production supervisors.
+
 The recommended production mode binds to localhost and places Nginx/Caddy/TLS
 in front of it. If a trusted internal reverse proxy is on another host, bind
 to `0.0.0.0` explicitly instead. The token files must be owner-only (`0600`);
