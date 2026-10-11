@@ -18,6 +18,7 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 import topify_common as common
+import topify_registry
 import topify_seed
 import topify_supervisor
 
@@ -51,25 +52,96 @@ def _read_token_file(value: str | Path | None, label: str) -> str | None:
     return token
 
 
-class ConsoleState:
-    def __init__(self, campaign: str | Path, owner_token: str | None, supervisor_token: str | None):
+class SupervisorContext:
+    def __init__(self, supervisor_id: str, benchmark: str, campaign: str | Path):
+        self.supervisor_id = supervisor_id
+        self.benchmark = benchmark
         self.root, self.campaign = topify_seed.load_campaign(campaign)
         if not (self.root / "supervision/manifest.json").is_file():
-            raise common.PipelineError("run supervisor-init before starting the web console")
-        self.tokens = {}
-        self.owner_token = owner_token or _token()
-        self.supervisor_token = supervisor_token or _token()
-        self.tokens[_token_hash(self.owner_token)] = "owner"
-        self.tokens[_token_hash(self.supervisor_token)] = "supervisor"
+            raise common.PipelineError(f"run supervisor-init before adding {supervisor_id}")
 
-    def role(self, value: str | None) -> str | None:
+    def dashboard(self, employee_id: str | None = None) -> dict:
+        value, _ = topify_supervisor.dashboard(self.root, employee_id)
+        return {"supervisor_id": self.supervisor_id, "benchmark": self.benchmark, **value}
+
+
+class ConsoleState:
+    def __init__(
+        self,
+        campaign: str | Path | None,
+        owner_token: str | None,
+        supervisor_token: str | None,
+        owner_token_file: str | Path | None = None,
+        supervisor_token_file: str | Path | None = None,
+        registry_file: str | Path | None = None,
+    ):
+        self.tokens = {}
+        self.contexts = {}
+        if registry_file is not None:
+            registry = topify_registry.load(registry_file)
+            owner_token = owner_token or _read_token_file(registry.get("owner_token_file"), "registry owner_token_file")
+            for item in registry["supervisors"]:
+                token = _read_token_file(item.get("supervisor_token_file"), f"{item['supervisor_id']} supervisor token")
+                if token is None:
+                    token = _token()
+                context = SupervisorContext(item["supervisor_id"], item["benchmark"], item["campaign"])
+                self.contexts[context.supervisor_id] = context
+                self.tokens[_token_hash(token)] = ("supervisor", context.supervisor_id)
+            self.registry_file = str(registry["registry_file"])
+            self.dedup_root = registry["dedup_root"]
+        else:
+            if campaign is None:
+                raise common.PipelineError("campaign or registry_file is required")
+            owner_token = owner_token or _read_token_file(owner_token_file, "owner_token_file")
+            supervisor_token = supervisor_token or _read_token_file(supervisor_token_file, "supervisor_token_file")
+            context = SupervisorContext("default", "Benchmark", campaign)
+            self.contexts["default"] = context
+            self.tokens[_token_hash(supervisor_token or _token())] = ("supervisor", "default")
+            self.registry_file = None
+            self.dedup_root = None
+        self.owner_token = owner_token or _token()
+        self.tokens[_token_hash(self.owner_token)] = ("owner", None)
+
+    def auth(self, value: str | None) -> tuple[str, str | None] | None:
         if not value:
             return None
         return self.tokens.get(_token_hash(value))
 
-    def dashboard(self, employee_id: str | None = None) -> dict:
-        value, _ = topify_supervisor.dashboard(self.root, employee_id)
+    def context(self, supervisor_id: str | None, auth: tuple[str, str | None], required: bool = True) -> SupervisorContext | None:
+        role, token_scope = auth
+        scope = supervisor_id or token_scope
+        if role == "supervisor" and scope != token_scope:
+            raise PermissionError("supervisor token is scoped to another supervisor")
+        if scope is None:
+            if required:
+                raise common.PipelineError("supervisor_id is required for this action")
+            return None
+        value = self.contexts.get(scope)
+        if value is None:
+            raise common.PipelineError(f"unknown supervisor_id: {scope}")
         return value
+
+    def supervisors(self) -> list[dict]:
+        return [
+            {
+                "supervisor_id": context.supervisor_id,
+                "benchmark": context.benchmark,
+                "campaign": str(context.root),
+            }
+            for context in self.contexts.values()
+        ]
+
+    def dashboard(self, supervisor_id: str | None = None, employee_id: str | None = None) -> dict:
+        if supervisor_id is not None:
+            return self.contexts[supervisor_id].dashboard(employee_id)
+        rows = [context.dashboard() for context in self.contexts.values()]
+        return {
+            "schema_version": 1,
+            "aggregate": True,
+            "supervisors": rows,
+            "alerts": [alert for row in rows for alert in row.get("alerts", [])],
+            "employees": [employee for row in rows for employee in row.get("employees", [])],
+        }
 
 
 def _json_bytes(value: object) -> bytes:
@@ -91,20 +163,27 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         values = parse_qs(urlparse(self.path).query).get("token", [])
         return values[0] if values else None
 
-    def _role(self) -> str | None:
+    def _auth(self) -> tuple[str, str | None] | None:
         header = self.headers.get("Authorization", "")
         token = header.removeprefix("Bearer ").strip() if header.startswith("Bearer ") else None
-        return self.state.role(token or self._query_token())
+        return self.state.auth(token or self._query_token())
 
-    def _require(self, action: str | None = None) -> str:
-        role = self._role()
-        if role is None:
+    def _require(self, action: str | None = None, supervisor_id: str | None = None) -> tuple[str, str | None]:
+        auth = self._auth()
+        if auth is None:
             self._respond(401, {"error": "authentication required"})
             raise PermissionError
+        role, token_scope = auth
         if action == "owner" and role != "owner":
             self._respond(403, {"error": "owner approval required"})
             raise PermissionError
-        return role
+        if supervisor_id is not None and role == "supervisor" and token_scope != supervisor_id:
+            self._respond(403, {"error": "supervisor token is scoped to another supervisor"})
+            raise PermissionError
+        return auth
+
+    def _context(self, auth: tuple[str, str | None], supervisor_id: str | None, required: bool = True):
+        return self.state.context(supervisor_id, auth, required=required)
 
     def _respond(self, status: int, value: object) -> None:
         data = _json_bytes(value)
@@ -128,29 +207,47 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             raise ValueError("request body must be a JSON object")
         return value
 
-    def _inside_campaign(self, value: str | None, label: str) -> Path | None:
+    def _inside_campaign(self, value: str | None, label: str, context: SupervisorContext | None = None) -> Path | None:
         if value is None:
             return None
         path = Path(value).resolve(strict=True)
-        if not path.is_file() or not path.is_relative_to(self.state.root):
+        if context is None or not path.is_file() or not path.is_relative_to(context.root):
             raise ValueError(f"{label} must be a file inside the campaign")
         return path
+
+    def _query_supervisor_id(self) -> str | None:
+        return parse_qs(urlparse(self.path).query).get("supervisor_id", [None])[0]
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         try:
             if parsed.path == "/api/me":
-                role = self._require()
-                self._respond(200, {"role": role, "campaign": str(self.state.root)})
+                auth = self._require()
+                supervisors = self.state.supervisors()
+                if auth[0] == "supervisor":
+                    supervisors = [item for item in supervisors if item["supervisor_id"] == auth[1]]
+                self._respond(200, {"role": auth[0], "supervisor_id": auth[1], "supervisors": supervisors})
+                return
+            if parsed.path == "/api/supervisors":
+                auth = self._require()
+                supervisors = self.state.supervisors()
+                if auth[0] == "supervisor":
+                    supervisors = [item for item in supervisors if item["supervisor_id"] == auth[1]]
+                self._respond(200, {"supervisors": supervisors})
                 return
             if parsed.path == "/api/dashboard":
-                self._require()
+                supervisor_id = self._query_supervisor_id()
+                auth = self._require(supervisor_id=supervisor_id)
                 employee_id = parse_qs(parsed.query).get("employee_id", [None])[0]
-                self._respond(200, self.state.dashboard(employee_id))
+                if supervisor_id is None and auth[0] == "supervisor":
+                    supervisor_id = auth[1]
+                self._respond(200, self.state.dashboard(supervisor_id, employee_id))
                 return
             if parsed.path == "/api/events":
-                self._require()
-                self._respond(200, {"events": self._events()})
+                supervisor_id = self._query_supervisor_id()
+                auth = self._require(supervisor_id=supervisor_id)
+                context = self._context(auth, supervisor_id)
+                self._respond(200, {"supervisor_id": context.supervisor_id, "events": self._events(context)})
                 return
             if parsed.path == "/api/stream":
                 self._stream()
@@ -161,8 +258,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         except (common.PipelineError, OSError, ValueError, TypeError) as exc:
             self._respond(400, {"error": str(exc)})
 
-    def _events(self) -> list[dict]:
-        path = self.state.root / "supervision/events.jsonl"
+    def _events(self, context: SupervisorContext) -> list[dict]:
+        path = context.root / "supervision/events.jsonl"
         if not path.is_file():
             return []
         rows = []
@@ -174,8 +271,11 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         return rows
 
     def _stream(self) -> None:
+        supervisor_id = self._query_supervisor_id()
         try:
-            self._require()
+            auth = self._require(supervisor_id=supervisor_id)
+            if supervisor_id is None and auth[0] == "supervisor":
+                supervisor_id = auth[1]
         except PermissionError:
             return
         self.send_response(200)
@@ -187,7 +287,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         deadline = time.monotonic() + 300
         try:
             while time.monotonic() < deadline:
-                dashboard = self.state.dashboard()
+                dashboard = self.state.dashboard(supervisor_id)
                 fingerprint = common.canonical_sha256(dashboard)
                 if fingerprint != previous:
                     payload = _json_bytes(dashboard).decode("utf-8").rstrip("\n")
@@ -227,44 +327,51 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         try:
             if parsed.path == "/api/dispatch":
-                self._require()
                 body = self._body()
-                result, code = topify_supervisor.dispatch(self.state.root, body["employee_id"])
+                auth = self._require(supervisor_id=body.get("supervisor_id"))
+                context = self._context(auth, body.get("supervisor_id"))
+                result, code = topify_supervisor.dispatch(context.root, body["employee_id"])
                 self._respond(200 if code == 0 else 409, result)
                 return
             if parsed.path == "/api/fire":
-                self._require()
                 body = self._body()
-                evidence = self._inside_campaign(body.get("evidence"), "evidence")
+                auth = self._require(supervisor_id=body.get("supervisor_id"))
+                context = self._context(auth, body.get("supervisor_id"))
+                evidence = self._inside_campaign(body.get("evidence"), "evidence", context)
                 result, code = topify_supervisor.fire(
-                    self.state.root, body["employee_id"], body["reason"], evidence
+                    context.root, body["employee_id"], body["reason"], evidence
                 )
                 self._respond(200 if code == 0 else 409, result)
                 return
             if parsed.path == "/api/replacement":
-                self._require()
                 body = self._body()
-                prompt = self._inside_campaign(body.get("prompt_file"), "prompt_file")
+                auth = self._require(supervisor_id=body.get("supervisor_id"))
+                context = self._context(auth, body.get("supervisor_id"))
+                prompt = self._inside_campaign(body.get("prompt_file"), "prompt_file", context)
+                fingerprint = self._inside_campaign(body.get("fingerprint_file"), "fingerprint_file", context)
                 result, code = topify_supervisor.replace_seed(
-                    self.state.root, body["former_employee_id"], body["new_employee_id"],
-                    body["new_seed_id"], body["transport"], prompt
+                    context.root, body["former_employee_id"], body["new_employee_id"],
+                    body["new_seed_id"], body["transport"], prompt, fingerprint
                 )
                 self._respond(200 if code == 0 else 409, result)
                 return
             if parsed.path == "/api/qc-resolve":
                 body = self._body()
-                role = self._require("owner" if body.get("decision") == "accept_exception" else None)
-                evidence = self._inside_campaign(body.get("evidence"), "evidence")
+                auth = self._require("owner" if body.get("decision") == "accept_exception" else None,
+                                     body.get("supervisor_id"))
+                context = self._context(auth, body.get("supervisor_id"))
+                evidence = self._inside_campaign(body.get("evidence"), "evidence", context)
                 result, code = topify_supervisor.qc_resolve(
-                    self.state.root, body["producer_id"], body["decision"],
+                    context.root, body["producer_id"], body["decision"],
                     body["note"], evidence,
                 )
-                self._respond(200 if code == 0 else 409, {"role": role, **result})
+                self._respond(200 if code == 0 else 409, {"role": auth[0], **result})
                 return
             if parsed.path == "/api/command":
                 self._require("owner")
                 body = self._body()
-                result = self._write_command(body)
+                context = self._context(("owner", None), body.get("supervisor_id"))
+                result = self._write_command(context, body)
                 self._respond(201, result)
                 return
             self._respond(404, {"error": "not found"})
@@ -273,11 +380,11 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         except (KeyError, common.PipelineError, OSError, ValueError, TypeError) as exc:
             self._respond(400, {"error": str(exc)})
 
-    def _write_command(self, body: dict) -> dict:
+    def _write_command(self, context: SupervisorContext, body: dict) -> dict:
         text = body.get("text") or body.get("command")
         if not isinstance(text, str) or not text.strip() or len(text) > 10_000:
             raise ValueError("command text must be nonempty and at most 10000 characters")
-        directory = self.state.root / "supervision/commands"
+        directory = context.root / "supervision/commands"
         directory.mkdir(exist_ok=True)
         number, attempt = common.next_attempt(directory)
         command = {
@@ -290,8 +397,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         }
         command["command_sha256"] = common.canonical_sha256(command)
         common.write_new_json(attempt / "command.json", command)
-        topify_supervisor._append(self.state.root, "owner_command_queued", command_sha256=command["command_sha256"])
-        return {"status": "queued", "path": str(attempt / "command.json"), "command_sha256": command["command_sha256"]}
+        topify_supervisor._append(context.root, "owner_command_queued", command_sha256=command["command_sha256"], supervisor_id=context.supervisor_id)
+        return {"status": "queued", "supervisor_id": context.supervisor_id, "path": str(attempt / "command.json"), "command_sha256": command["command_sha256"]}
 
 
 class ConsoleServer(ThreadingHTTPServer):
@@ -304,19 +411,21 @@ class ConsoleServer(ThreadingHTTPServer):
 
 
 def serve(
-    campaign: str | Path,
+    campaign: str | Path | None,
     host: str = "0.0.0.0",
     port: int = 8787,
     owner_token: str | None = None,
     supervisor_token: str | None = None,
     owner_token_file: str | Path | None = None,
     supervisor_token_file: str | Path | None = None,
+    registry_file: str | Path | None = None,
 ) -> tuple[dict, int]:
     if type(port) is not int or not 1 <= port <= 65535:
         raise common.PipelineError("web port must be between 1 and 65535")
     owner_token = owner_token or _read_token_file(owner_token_file, "owner_token_file")
     supervisor_token = supervisor_token or _read_token_file(supervisor_token_file, "supervisor_token_file")
-    state = ConsoleState(campaign, owner_token, supervisor_token)
+    state = ConsoleState(campaign, owner_token, supervisor_token,
+                         owner_token_file, supervisor_token_file, registry_file)
     server = ConsoleServer((host, port), state)
     report = {
         "status": "running",
@@ -324,7 +433,8 @@ def serve(
         "listen_url": f"http://{host}:{port}",
         "owner_token": state.owner_token,
         "supervisor_token": state.supervisor_token,
-        "campaign": str(state.root),
+        "campaigns": [str(context.root) for context in state.contexts.values()],
+        "supervisors": state.supervisors(),
         "warning": "Use any reachable server IP with this port; keep tokens private and protect the network path.",
     }
     print(json.dumps(report, ensure_ascii=False, sort_keys=True), flush=True)

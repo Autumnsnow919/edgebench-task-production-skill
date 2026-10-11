@@ -376,3 +376,11 @@ Use campaign-level caps as planning controls, not DOCX claims. For example,
 limit how many promoted seeds share one upstream, one dataset, one generator,
 or one objective signature, and reserve capacity for underrepresented feedback
 types. Record any override with its diversity rationale.
+
+For hierarchical campaigns, apply these controls before hiring/dispatching a
+producer, not only at final promotion. The supervisor's shared dedup registry
+reserves a canonical Seed fingerprint (lineage, dataset IDs, objective,
+artifact and verifier semantics) under an exclusive lock. The same task
+SHA-256 is also globally registered at freeze. Exact collisions are hard
+blocks; a cross-Benchmark semantic collision is an owner-review item unless
+the active requirements explicitly authorize reuse.

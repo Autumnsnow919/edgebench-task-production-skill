@@ -23,6 +23,19 @@ class SupervisorProtocolTests(unittest.TestCase):
         self.campaign = self.root / "campaign"
         topify_seed.initialize_campaign(self.campaign, config)
         topify_supervisor.initialize(self.campaign, mode="dual")
+        self.fingerprint = self.root / "seed-fingerprint.json"
+        self.fingerprint.write_text(json.dumps({
+            "dedup": {
+                "upstream_ids": ["cp/python:lead-001"],
+                "dataset_ids": [],
+                "objective_signature": "recovery-index-v1",
+            },
+            "task_hypothesis": {
+                "raw_metric": "score",
+                "direction": "maximize",
+                "offline_verifier_plan": "offline-checker",
+            },
+        }))
 
     def tearDown(self):
         self.temp.cleanup()
@@ -34,6 +47,7 @@ class SupervisorProtocolTests(unittest.TestCase):
             "producer",
             "opencode-task",
             seed_id="systems-software-engineering/cpython/lead-001",
+            fingerprint_file=self.fingerprint,
         )
         self.assertEqual(code, 0)
         self.assertEqual(producer["employment_status"], "active")
@@ -53,6 +67,7 @@ class SupervisorProtocolTests(unittest.TestCase):
         topify_supervisor.hire(
             self.campaign, "producer-001", "producer", "opencode-task",
             seed_id="systems-software-engineering/cpython/lead-001",
+            fingerprint_file=self.fingerprint,
         )
         request, code = topify_supervisor.child_request(
             self.campaign, "producer-001", "producer-001-seed-01", "producer",
@@ -86,6 +101,7 @@ class SupervisorProtocolTests(unittest.TestCase):
         topify_supervisor.hire(
             self.campaign, "producer-001", "producer", "opencode-task",
             seed_id="systems-software-engineering/cpython/lead-001",
+            fingerprint_file=self.fingerprint,
         )
         report_path = self.root / "worker.json"
         report_path.write_text(json.dumps({
@@ -111,8 +127,50 @@ class SupervisorProtocolTests(unittest.TestCase):
             self.campaign, topify_web._read_token_file(owner, "owner"),
             topify_web._read_token_file(supervisor, "supervisor"),
         )
-        self.assertEqual(state.role("owner-secret"), "owner")
-        self.assertEqual(state.role("supervisor-secret"), "supervisor")
+        self.assertEqual(state.auth("owner-secret"), ("owner", None))
+        self.assertEqual(state.auth("supervisor-secret"), ("supervisor", "default"))
+
+    def test_registry_keeps_multiple_supervisors_on_one_console(self):
+        global_dedup = self.root / "dedup-global"
+        first = self.root / "first-campaign"
+        second = self.root / "second-campaign"
+        config = Path(__file__).resolve().parents[1] / "examples/campaign-config.json"
+        topify_seed.initialize_campaign(first, config)
+        topify_supervisor.initialize(first, mode="dual", dedup_root=global_dedup)
+        topify_seed.initialize_campaign(second, config)
+        topify_supervisor.initialize(second, mode="dual", dedup_root=global_dedup)
+        owner = self.root / "owner.token"
+        first_token = self.root / "first.token"
+        second_token = self.root / "second.token"
+        for path, value in ((owner, "owner"), (first_token, "first"), (second_token, "second")):
+            path.write_text(value)
+            os.chmod(path, 0o600)
+        registry = self.root / "supervisors.json"
+        registry.write_text(json.dumps({
+            "schema_version": 1,
+            "owner_token_file": str(owner),
+            "dedup_root": str(global_dedup),
+            "supervisors": [
+                {"supervisor_id": "first", "benchmark": "EdgeBench", "campaign": str(first), "supervisor_token_file": str(first_token)},
+                {"supervisor_id": "second", "benchmark": "OtherBench", "campaign": str(second), "supervisor_token_file": str(second_token)},
+            ],
+        }))
+        state = topify_web.ConsoleState(None, None, None, registry_file=registry)
+        self.assertEqual(len(state.supervisors()), 2)
+        self.assertEqual(state.auth("owner"), ("owner", None))
+        self.assertEqual(state.auth("second"), ("supervisor", "second"))
+        self.assertEqual(state.dashboard("first")["benchmark"], "EdgeBench")
+        topify_supervisor.hire(
+            first, "first-producer", "producer", "opencode-task",
+            seed_id="systems-software-engineering/cpython/lead-001",
+            fingerprint_file=self.fingerprint,
+        )
+        with self.assertRaises(ValueError):
+            topify_supervisor.hire(
+                second, "second-producer", "producer", "opencode-task",
+                seed_id="systems-software-engineering/cpython/lead-999",
+                fingerprint_file=self.fingerprint,
+            )
 
 
 if __name__ == "__main__":

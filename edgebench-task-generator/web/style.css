@@ -18,6 +18,7 @@ button, input { font: inherit; }
 h1, h2, h3, p { margin: 0; } h1 { font-size: 25px; letter-spacing: -.03em; } h2 { font-size: 18px; } h3 { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
 .eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .16em; text-transform: uppercase; font-weight: 700; }
 .top-actions, .detail-actions { display: flex; gap: 10px; align-items: center; }
+.select { border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px; color: var(--text); background: var(--panel-2); max-width: 260px; }
 .shell { max-width: 1500px; margin: 0 auto; padding: 30px 42px 60px; }
 .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
 .summary-card, .panel { border: 1px solid var(--line); background: linear-gradient(150deg, rgba(23,34,58,.92), rgba(18,26,44,.92)); box-shadow: var(--shadow); border-radius: 15px; }

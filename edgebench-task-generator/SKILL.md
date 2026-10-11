@@ -54,6 +54,12 @@ employee table plus only actionable alerts. Use the OpenCode child-session
 result or Orca `worker-show`/`worker-read` only for the named employee; the
 supervisor should not flood the owner with every raw transcript.
 
+When several Benchmarks are active, use the supervisor registry and keep one
+campaign/evidence tree per supervisor. The shared dedup root is the only
+cross-supervisor index: it stores fingerprints and frozen task hashes, not
+worker files. A producer may read and write only its own exclusive job root;
+QC gets a separate root and read-only task evidence.
+
 If the owner requests a browser dashboard, read
 `references/supervisor-web.md` and start `supervisor-web` with authentication.
 The Web console is another view/control plane over the ledger, not a second

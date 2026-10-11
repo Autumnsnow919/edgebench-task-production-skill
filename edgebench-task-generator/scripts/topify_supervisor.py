@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 
 import topify_common as common
+import topify_dedup
 import topify_profile
 import topify_seed
 import topify_validate
@@ -77,7 +78,7 @@ def _supervision_config(campaign: dict) -> dict:
         value = {}
     if not isinstance(value, dict):
         raise common.PipelineError("campaign supervision config must be an object")
-    allowed = {"max_concurrent", "transport_modes", "employee_unit", "max_child_tasks"}
+    allowed = {"max_concurrent", "transport_modes", "employee_unit", "max_child_tasks", "dedup_mode"}
     unknown = set(value) - allowed
     if unknown:
         raise common.PipelineError(f"unknown supervision config keys: {sorted(unknown)}")
@@ -99,6 +100,7 @@ def _supervision_config(campaign: dict) -> dict:
         "transport_modes": sorted(set(modes)),
         "employee_unit": employee_unit,
         "max_child_tasks": max_child_tasks,
+        "dedup_mode": value.get("dedup_mode", "warn"),
     }
 
 
@@ -206,7 +208,12 @@ def _load_manifest(root: Path, campaign: dict) -> dict:
     return manifest
 
 
-def initialize(workspace: str | Path, mode: str = "dual", max_concurrent: int | None = None) -> tuple[dict, int]:
+def initialize(
+    workspace: str | Path,
+    mode: str = "dual",
+    max_concurrent: int | None = None,
+    dedup_root: str | Path | None = None,
+) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     supervision = _supervision_root(root)
     if mode not in {"dual", "opencode-task", "orca-cli"}:
@@ -216,6 +223,7 @@ def initialize(workspace: str | Path, mode: str = "dual", max_concurrent: int | 
         if type(max_concurrent) is not int or max_concurrent < 1:
             raise common.PipelineError("max_concurrent must be a positive integer")
         config["max_concurrent"] = max_concurrent
+    dedup_path = topify_dedup.ensure_root(dedup_root or (root / "supervision/dedup"))
     modes = config["transport_modes"] if mode == "dual" else [mode]
     manifest = {
         "schema_version": 1,
@@ -226,6 +234,8 @@ def initialize(workspace: str | Path, mode: str = "dual", max_concurrent: int | 
         "employee_unit": config["employee_unit"],
         "max_concurrent": config["max_concurrent"],
         "max_child_tasks": config["max_child_tasks"],
+        "dedup_mode": config["dedup_mode"],
+        "dedup_root": str(dedup_path),
         "status": "ready",
         "initialized_at": common.utc_now(),
     }
@@ -298,6 +308,7 @@ def hire(
     parent_id: str | None = None,
     prompt_file: str | Path | None = None,
     replacement_of: str | None = None,
+    fingerprint_file: str | Path | None = None,
 ) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     manifest = _load_manifest(root, campaign)
@@ -329,6 +340,20 @@ def hire(
             raise common.PipelineError("replacement_of must identify a fired producer")
         if seed_id is None or seed_id == old.get("seed_id"):
             raise common.PipelineError("a replacement producer must receive a new Seed")
+    dedup_claim = None
+    if role == "producer" and seed_id is not None:
+        if fingerprint_file is None and manifest.get("dedup_mode") == "strict":
+            raise common.PipelineError("strict dedup requires --fingerprint-file for a producer Seed")
+        if fingerprint_file is not None:
+            fingerprint_path = Path(fingerprint_file)
+            dedup_claim, dedup_code = topify_dedup.claim(
+                manifest["dedup_root"], fingerprint_path, employee_id,
+                campaign["config"].get("campaign_id", "benchmark"), seed_id,
+            )
+            if dedup_code != 0:
+                raise common.PipelineError(
+                    f"Seed dedup collision: {dedup_claim.get('fingerprint', 'unknown')}"
+                )
     active = _active_count(root)
     state = "active" if active < manifest["max_concurrent"] else "queued"
     job_root = root / "supervision/agent-workspaces" / employee_id
@@ -351,6 +376,7 @@ def hire(
         "prompt_path": str(prompt) if prompt else None,
         "prompt_sha256": common.sha256_file(prompt) if prompt else None,
         "replacement_of": old["employee_id"] if old else None,
+        "dedup_claim": dedup_claim,
         "hired_at": common.utc_now(),
     }
     value["employment_contract_sha256"] = common.canonical_sha256(value)
@@ -590,6 +616,9 @@ def dispatch(workspace: str | Path, employee_id: str, output: str | Path | None 
         raise common.PipelineError("employee is not dispatchable in its current state")
     if employee.get("employment_status") == "queued" and _active_count(root) >= manifest["max_concurrent"]:
         raise common.PipelineError("employee is queued until a concurrency slot is available")
+    if (employee.get("role") == "producer" and employee.get("seed_id")
+            and manifest.get("dedup_mode") == "strict" and not employee.get("dedup_claim")):
+        raise common.PipelineError("producer cannot dispatch before its Seed has a dedup claim")
     number, attempt = common.next_attempt(root / "supervision/dispatches" / employee_id)
     dispatch_id = f"{employee_id}-d{number:04d}"
     prompt = employee.get("prompt_path")
@@ -682,6 +711,46 @@ def report(workspace: str | Path, employee_id: str, report_file: str | Path) -> 
     _append(root, "employee_reported", employee_id=employee_id, report_status=status_value,
             report_sha256=receipt["report_sha256"])
     return receipt, 0
+
+
+def dedup_claim(workspace: str | Path, employee_id: str, fingerprint_file: str | Path) -> tuple[dict, int]:
+    root, campaign = _root(workspace)
+    manifest = _load_manifest(root, campaign)
+    employee = _employee(root, employee_id)
+    if employee.get("role") != "producer" or not employee.get("seed_id"):
+        raise common.PipelineError("dedup claim needs a producer with an assigned Seed")
+    if employee.get("dedup_claim"):
+        raise common.PipelineError("producer already has a dedup claim")
+    claim_value, code = topify_dedup.claim(
+        manifest["dedup_root"], fingerprint_file, employee_id,
+        campaign["config"].get("campaign_id", "benchmark"), employee["seed_id"],
+    )
+    if code != 0:
+        raise common.PipelineError(
+            f"Seed dedup collision: {claim_value.get('fingerprint', 'unknown')}"
+        )
+    _save_employee(root, {**employee, "dedup_claim": claim_value})
+    _append(root, "employee_dedup_claimed", employee_id=employee_id,
+            fingerprint=claim_value["fingerprint"], claim_sha256=claim_value["claim_sha256"])
+    return claim_value, 0
+
+
+def dedup_register_task(workspace: str | Path, employee_id: str, task_sha256: str) -> tuple[dict, int]:
+    root, campaign = _root(workspace)
+    manifest = _load_manifest(root, campaign)
+    employee = _employee(root, employee_id)
+    if employee.get("role") != "producer":
+        raise common.PipelineError("task dedup registration needs a producer")
+    result, code = topify_dedup.register_task(
+        manifest["dedup_root"], task_sha256, employee_id,
+        campaign["config"].get("campaign_id", "benchmark"),
+    )
+    if code != 0:
+        raise common.PipelineError(f"task SHA-256 collision: {task_sha256}")
+    _save_employee(root, {**employee, "task_dedup": result})
+    _append(root, "employee_task_registered", employee_id=employee_id,
+            task_sha256=task_sha256, registration_sha256=result["registration_sha256"])
+    return result, 0
 
 
 def qc_decision(
@@ -860,19 +929,34 @@ def rollout_gate(
     final: bool = False,
 ) -> tuple[dict, int]:
     root, campaign = _root(workspace)
-    _load_manifest(root, campaign)
+    manifest = _load_manifest(root, campaign)
     employee = _employee(root, employee_id)
     if employee.get("role") != "producer":
         raise common.PipelineError("rollout gate must belong to a producer employee")
     observations_path, observations = _json_file(observations_file, "rollout observations")
+    task_dedup = None
     if profile_file is None and task_workspace is not None:
         task_root, _ = common.load_workspace(task_workspace)
         task_hash = topify_validate.task_sha256(task_root / "task")
+        task_dedup, task_code = topify_dedup.register_task(
+            manifest["dedup_root"], task_hash, employee_id,
+            campaign["config"].get("campaign_id", "benchmark"),
+        )
+        if task_code != 0:
+            raise common.PipelineError(f"task SHA-256 collision: {task_hash}")
         receipt = topify_profile.current(task_root, task_hash)
         if not receipt:
             raise common.PipelineError("task workspace has no current benchmark profile")
         profile = topify_profile.load_profile(receipt["profile_id"], receipt["profile_path"])
     elif profile_file is not None:
+        task_hash = observations.get("task_sha256")
+        if isinstance(task_hash, str) and common.HEX64.fullmatch(task_hash):
+            task_dedup, task_code = topify_dedup.register_task(
+                manifest["dedup_root"], task_hash, employee_id,
+                campaign["config"].get("campaign_id", "benchmark"),
+            )
+            if task_code != 0:
+                raise common.PipelineError(f"task SHA-256 collision: {task_hash}")
         profile_path = _regular_file(profile_file, "profile_file")
         raw_profile = common.load_json(profile_path)
         profile_id = raw_profile.get("profile_id")
@@ -904,7 +988,12 @@ def rollout_gate(
         next_state = "rollout-running"
     else:
         next_state = "needs-owner-decision"
-    _save_employee(root, {**employee, "employment_status": next_state, "last_rollout_gate": result})
+    _save_employee(root, {
+        **employee,
+        "employment_status": next_state,
+        "last_rollout_gate": result,
+        **({"task_dedup": task_dedup} if task_dedup is not None else {}),
+    })
     _append(root, "rollout_gate_recorded", employee_id=employee_id, status=result["status"],
             action=result["action"], gate_sha256=result["gate_sha256"])
     return result, 0 if result["status"] in {"CONTINUE", "ACCEPT"} else 2
@@ -917,6 +1006,7 @@ def replace_seed(
     new_seed_id: str,
     transport: str,
     prompt_file: str | Path | None = None,
+    fingerprint_file: str | Path | None = None,
 ) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     _load_manifest(root, campaign)
@@ -927,7 +1017,8 @@ def replace_seed(
         raise common.PipelineError("replacement must use a different nonempty Seed ID")
     value, code = hire(root, new_employee_id, "producer", transport,
                        task_id=None, seed_id=new_seed_id, parent_id=None,
-                       prompt_file=prompt_file, replacement_of=former_employee_id)
+                       prompt_file=prompt_file, replacement_of=former_employee_id,
+                       fingerprint_file=fingerprint_file)
     if code != 0:
         return value, code
     order = {

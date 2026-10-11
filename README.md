@@ -68,6 +68,10 @@ orca skills install --skill orca-cli --skill orchestration
 The full authority, QC, replacement, checkpoint and `orca orchestration`
 mapping is in `edgebench-task-generator/references/supervisor-protocol.md`.
 
+Strict campaign examples also reserve Seed/task fingerprints in a shared dedup
+registry before dispatch, preventing two supervisors or their subordinates from
+quietly authoring the same question.
+
 The intended owner interaction is chat-first: say “派发 10 个出题下属” in
 OpenCode or Orca. The supervisor Agent runs the ledger and dispatch commands
 internally, starts OpenCode Tasks or Orca supervised workers, and reports only
@@ -85,13 +89,15 @@ ledger and SSE updates, with separate owner/supervisor tokens:
 
 ```bash
 python3 edgebench-task-generator/scripts/topify_pipeline.py \
-  supervisor-web CAMPAIGN --host 0.0.0.0 --port 8787 \
-  --owner-token-file /etc/edgebench/owner.token \
-  --supervisor-token-file /etc/edgebench/supervisor.token
+  supervisor-web \
+  --registry-file /etc/edgebench/supervisors.json \
+  --host 0.0.0.0 --port 8787 \
+  --owner-token-file /etc/edgebench/owner.token
 ```
 
-The service listens on every interface, so other IPs can connect to any
-reachable server IP on port 8787. Use a trusted network or a TLS reverse proxy;
+The service can host multiple separated Benchmark supervisors from one registry
+and listens on every interface, so other IPs can connect to any reachable
+server IP on port 8787. Use a trusted network or a TLS reverse proxy;
 do not expose plain HTTP directly to the public internet. Keep token files at
 mode `0600` and run this command under systemd/supervisord for persistence. See
 `edgebench-task-generator/references/supervisor-web.md` for controls and API.

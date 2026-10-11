@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "owner_token_file": "/etc/edgebench/owner.token",
+  "dedup_root": "/var/lib/edgebench/dedup-global",
+  "supervisors": [
+    {
+      "supervisor_id": "edgebench",
+      "benchmark": "EdgeBench",
+      "campaign": "/var/lib/edgebench/campaigns/edgebench",
+      "supervisor_token_file": "/etc/edgebench/edgebench-supervisor.token"
+    },
+    {
+      "supervisor_id": "otherbench",
+      "benchmark": "Other Benchmark",
+      "campaign": "/var/lib/edgebench/campaigns/otherbench",
+      "supervisor_token_file": "/etc/edgebench/otherbench-supervisor.token"
+    }
+  ]
+}

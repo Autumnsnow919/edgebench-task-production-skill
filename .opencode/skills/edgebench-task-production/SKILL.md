@@ -81,6 +81,12 @@ employee, run `supervisor-dashboard` internally. Present status, last report,
 QC/rollout checkpoint and alerts in chat. Do not expose raw credentials or dump
 all worker logs by default; offer a focused worker read only when needed.
 
+When multiple Benchmarks or major supervisors are registered, keep their
+campaign roots, employee trees, tokens and evidence scopes separate. A Web
+selector may aggregate summaries for the owner, but a supervisor token can
+only address its own Benchmark. Every employee and child Task still receives
+an exclusive job root; never use a shared worktree as a shortcut.
+
 When the owner asks for a Web control panel, read
 `edgebench-task-generator/references/supervisor-web.md` and start the
 authenticated `supervisor-web` server through the shell. Use the owner-approved

@@ -107,9 +107,12 @@ def validate_campaign_config(config: dict) -> dict:
             raise common.PipelineError(f"{key} must be a positive integer")
     supervision = config.get("supervision")
     if supervision is not None:
-        if not isinstance(supervision, dict) or set(supervision) != {
+        supervision_required = {
             "max_concurrent", "transport_modes", "employee_unit", "max_child_tasks"
-        }:
+        }
+        if (not isinstance(supervision, dict)
+                or not supervision_required <= set(supervision)
+                or set(supervision) - supervision_required - {"dedup_mode"}):
             raise common.PipelineError(
                 "supervision must declare max_concurrent, transport_modes, employee_unit and max_child_tasks"
             )
@@ -123,6 +126,8 @@ def validate_campaign_config(config: dict) -> dict:
             raise common.PipelineError("supervision.employee_unit must be one-task")
         if type(supervision["max_child_tasks"]) is not int or supervision["max_child_tasks"] < 0:
             raise common.PipelineError("supervision.max_child_tasks must be nonnegative")
+        if supervision.get("dedup_mode", "warn") not in {"strict", "warn"}:
+            raise common.PipelineError("supervision.dedup_mode must be strict or warn")
     common.canonical_sha256(config)
     return config
 

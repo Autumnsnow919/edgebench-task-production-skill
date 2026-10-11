@@ -245,6 +245,7 @@ def parser() -> argparse.ArgumentParser:
     supervisor_init.add_argument("workspace", type=Path)
     supervisor_init.add_argument("--mode", choices=("dual", "opencode-task", "orca-cli"), default="dual")
     supervisor_init.add_argument("--max-concurrent", type=int)
+    supervisor_init.add_argument("--dedup-root", type=Path)
     employee_hire = commands.add_parser("employee-hire", help="register one one-task production employee")
     employee_hire.add_argument("workspace", type=Path)
     employee_hire.add_argument("--employee-id", required=True)
@@ -255,19 +256,21 @@ def parser() -> argparse.ArgumentParser:
     employee_hire.add_argument("--parent-id")
     employee_hire.add_argument("--prompt-file", type=Path)
     employee_hire.add_argument("--replacement-of")
+    employee_hire.add_argument("--fingerprint-file", type=Path)
     employee_status = commands.add_parser("employee-status", help="show supervisor employees and alerts")
     employee_status.add_argument("workspace", type=Path)
     supervisor_dashboard = commands.add_parser("supervisor-dashboard", help="show chat-friendly worker progress and alerts")
     supervisor_dashboard.add_argument("workspace", type=Path)
     supervisor_dashboard.add_argument("--employee-id")
     supervisor_web = commands.add_parser("supervisor-web", help="serve the authenticated supervisor web console")
-    supervisor_web.add_argument("workspace", type=Path)
+    supervisor_web.add_argument("workspace", type=Path, nargs="?")
     supervisor_web.add_argument("--host", default="0.0.0.0")
     supervisor_web.add_argument("--port", type=int, default=8787)
     supervisor_web.add_argument("--owner-token")
     supervisor_web.add_argument("--supervisor-token")
     supervisor_web.add_argument("--owner-token-file", type=Path)
     supervisor_web.add_argument("--supervisor-token-file", type=Path)
+    supervisor_web.add_argument("--registry-file", type=Path)
     employee_fire = commands.add_parser("employee-fire", help="record a controlled employee termination")
     employee_fire.add_argument("workspace", type=Path)
     employee_fire.add_argument("--employee-id", required=True)
@@ -291,6 +294,14 @@ def parser() -> argparse.ArgumentParser:
     employee_report.add_argument("workspace", type=Path)
     employee_report.add_argument("--employee-id", required=True)
     employee_report.add_argument("--input", required=True, type=Path)
+    dedup_claim = commands.add_parser("dedup-claim", help="reserve a Seed fingerprint before authoring")
+    dedup_claim.add_argument("workspace", type=Path)
+    dedup_claim.add_argument("--employee-id", required=True)
+    dedup_claim.add_argument("--fingerprint-file", required=True, type=Path)
+    dedup_task = commands.add_parser("dedup-register-task", help="register a frozen task hash globally")
+    dedup_task.add_argument("workspace", type=Path)
+    dedup_task.add_argument("--employee-id", required=True)
+    dedup_task.add_argument("--task-sha256", required=True)
     qc_decision = commands.add_parser("qc-decision", help="bind an independent QC decision to a producer")
     qc_decision.add_argument("workspace", type=Path)
     qc_decision.add_argument("--producer-id", required=True)
@@ -320,6 +331,7 @@ def parser() -> argparse.ArgumentParser:
     replacement.add_argument("--new-seed-id", required=True)
     replacement.add_argument("--transport", choices=sorted(topify_supervisor.TRANSPORTS), required=True)
     replacement.add_argument("--prompt-file", type=Path)
+    replacement.add_argument("--fingerprint-file", type=Path)
     domain_plan = commands.add_parser("domain-plan")
     domain_plan.add_argument("workspace", type=Path)
     domain_plan.add_argument("--playbook", type=Path, default=topify_domain.PLAYBOOK)
@@ -635,13 +647,13 @@ def main(argv: list[str] | None = None) -> int:
             report, code = topify_seed.campaign_status(args.workspace), 0
         elif args.command == "supervisor-init":
             report, code = topify_supervisor.initialize(
-                args.workspace, args.mode, args.max_concurrent
+                args.workspace, args.mode, args.max_concurrent, args.dedup_root
             )
         elif args.command == "employee-hire":
             report, code = topify_supervisor.hire(
                 args.workspace, args.employee_id, args.role, args.transport,
                 args.task_id, args.seed_id, args.parent_id, args.prompt_file,
-                args.replacement_of,
+                args.replacement_of, args.fingerprint_file,
             )
         elif args.command == "employee-status":
             report, code = topify_supervisor.status(args.workspace)
@@ -651,7 +663,7 @@ def main(argv: list[str] | None = None) -> int:
             report, code = topify_web.serve(
                 args.workspace, args.host, args.port, args.owner_token,
                 args.supervisor_token, args.owner_token_file,
-                args.supervisor_token_file,
+                args.supervisor_token_file, args.registry_file,
             )
         elif args.command == "employee-fire":
             report, code = topify_supervisor.fire(
@@ -670,6 +682,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "employee-report":
             report, code = topify_supervisor.report(
                 args.workspace, args.employee_id, args.input
+            )
+        elif args.command == "dedup-claim":
+            report, code = topify_supervisor.dedup_claim(
+                args.workspace, args.employee_id, args.fingerprint_file
+            )
+        elif args.command == "dedup-register-task":
+            report, code = topify_supervisor.dedup_register_task(
+                args.workspace, args.employee_id, args.task_sha256
             )
         elif args.command == "qc-decision":
             report, code = topify_supervisor.qc_decision(
@@ -690,6 +710,7 @@ def main(argv: list[str] | None = None) -> int:
             report, code = topify_supervisor.replace_seed(
                 args.workspace, args.former_employee_id, args.new_employee_id,
                 args.new_seed_id, args.transport, args.prompt_file,
+                args.fingerprint_file,
             )
         elif args.command == "domain-plan":
             report, code = topify_domain.plan(args.workspace, args.playbook,

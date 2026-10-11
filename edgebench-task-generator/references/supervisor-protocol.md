@@ -48,13 +48,21 @@ or delivery. A QC employee cannot be the producer or a child of that producer.
 The supervisor owns state transitions and receives only summaries and alerts by
 default; raw logs remain in the task's private evidence tree.
 
+With multiple major supervisors, each Benchmark is a separate campaign scope:
+its campaign root, employee ledger, task workspaces, QC evidence and supervisor
+token are not shared with another Benchmark. The owner Web token may aggregate
+the scopes; a supervisor token is restricted to one registry entry. The only
+shared filesystem is the dedup index, which contains content fingerprints and
+task hashes, never source trees or worker logs.
+
 ## Employee ledger
 
 Initialize the ledger after `campaign-init`:
 
 ```bash
 python3 edgebench-task-generator/scripts/topify_pipeline.py \
-  supervisor-init CAMPAIGN --mode dual --max-concurrent 100
+  supervisor-init CAMPAIGN --mode dual --max-concurrent 100 \
+  --dedup-root /var/lib/edgebench/dedup-global
 ```
 
 The ledger records `employee_id`, `parent_id`, role, transport, one-task
@@ -88,8 +96,16 @@ python3 edgebench-task-generator/scripts/topify_pipeline.py \
   employee-hire CAMPAIGN --employee-id producer-001 \
   --role producer --transport opencode-task \
   --seed-id systems-software-engineering/cpython/lead-001 \
-  --prompt-file WORK_ORDER.md
+  --prompt-file WORK_ORDER.md \
+  --fingerprint-file PINNED_SEED_CARD.json
 ```
+
+Strict campaigns reserve the Seed fingerprint before the producer is
+dispatchable. The shared dedup root uses an exclusive lock, so two supervisors
+cannot reserve the same source/objective/verifier signature concurrently.
+After freeze, the task SHA-256 is registered in the same global index. A
+collision blocks the later producer; it does not silently become a second
+variant of the same question.
 
 The producer may request a child, but does not create it directly:
 

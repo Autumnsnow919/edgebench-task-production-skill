@@ -4,16 +4,24 @@ The dependency-free console is a browser control plane for the same campaign
 ledger used by chat dispatch. It does not require Node, npm, Orca desktop or a
 GUI on the server.
 
+One Web process can host multiple isolated supervisors/Benchmarks. Each entry
+has its own campaign, employee tree and supervisor token; the owner token can
+switch between them from the Benchmark selector. The shared dedup root is
+validated at startup so two supervisors cannot silently use different dedup
+indexes.
+
 ## Start
 
-Initialize a campaign and supervisor first, then start the console. The chat
+Initialize each campaign and supervisor first, then create a registry from
+`examples/supervisor-registry.json`. Start the console with the registry. The chat
 supervisor may execute this command for the owner:
 
 ```bash
 python3 edgebench-task-generator/scripts/topify_pipeline.py \
-  supervisor-web CAMPAIGN --host 0.0.0.0 --port 8787 \
-  --owner-token-file /etc/edgebench/owner.token \
-  --supervisor-token-file /etc/edgebench/supervisor.token
+  supervisor-web \
+  --registry-file /etc/edgebench/supervisors.json \
+  --host 0.0.0.0 --port 8787 \
+  --owner-token-file /etc/edgebench/owner.token
 ```
 
 `0.0.0.0` accepts connections from every network interface, so any reachable
@@ -22,12 +30,14 @@ Tailscale/WireGuard network, or behind a TLS reverse proxy. Do not expose the
 plain HTTP port directly to the public internet. The token files must be
 owner-only (`0600`); the service keeps their values stable across restarts.
 
-If token files are omitted, the process generates separate owner and supervisor
-tokens and prints them once. For a resident service, use fixed `0600` token
-files so a restart does not invalidate browser sessions. The owner can queue
-instructions to the supervisor and approve QC exceptions; the supervisor can
-dispatch, terminate and replace employees. Keep both tokens private. Tokens are
-not written into campaign/customer packages.
+If token files are omitted in single-campaign mode, the process generates
+separate owner and supervisor tokens and prints them once. Multi-supervisor
+registry entries require fixed `0600` supervisor token files. For a resident
+service, use fixed `0600` token files so a restart does not invalidate browser
+sessions. The owner can switch Benchmark tabs, queue instructions to any
+supervisor and approve QC exceptions; a supervisor token can only see and
+control its own Benchmark. Keep all tokens private. Tokens are not written into
+campaign/customer packages.
 
 The service is foreground-safe and should be kept resident by systemd,
 supervisord or another process manager with automatic restart.
@@ -54,6 +64,7 @@ interfaces does not bypass firewall or network ACLs.
 ## Views
 
 - capacity, active workers and alerts;
+- separate tabs/cards for every registered supervisor and Benchmark;
 - employee table with parent, role, task/Seed, state and last report;
 - detail panel with QC and rollout gate evidence;
 - SSE updates every two seconds;
@@ -83,6 +94,7 @@ Authenticated requests use `Authorization: Bearer TOKEN`:
 
 ```text
 GET  /api/me
+GET  /api/supervisors
 GET  /api/dashboard[?employee_id=...]
 GET  /api/events
 GET  /api/stream?token=TOKEN
