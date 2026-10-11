@@ -190,6 +190,7 @@ def discover(
     return {
         "schema_version": 1,
         "discovered": True,
+        "registry_file": None,
         "scan_roots": [str(Path(item).absolute()) for item in scan_roots],
         "dedup_root": next(iter(dedup_roots)) if len(dedup_roots) == 1 else None,
         "supervisors": stamps,
