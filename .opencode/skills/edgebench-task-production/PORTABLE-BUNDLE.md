@@ -54,6 +54,10 @@ runtime. See `edgebench-task-generator/references/supervisor-protocol.md` for
 employee identity, independent QC, profile-bound rollout checkpoints and
 replacement rules.
 
+In normal use, the owner asks the supervisor in chat to dispatch workers. The
+supervisor runs these commands internally and invokes native OpenCode Tasks or
+Orca's supervised workers; the owner does not need to copy the CLI commands.
+
 Use `rehearsal` mode for production-line tests. Rehearsal artifacts are private
 and never count as Seed promotion, formal task delivery, model rollout or
 customer acceptance.

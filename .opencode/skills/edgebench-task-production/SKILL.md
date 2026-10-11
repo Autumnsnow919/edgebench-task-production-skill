@@ -54,6 +54,28 @@ replacement and delivery. A separate QC employee must review the producer's
 task. In single-agent mode the current OpenCode session may still own the task
 directly; it must not treat an old sample package as a new task.
 
+## Chat-first dispatch
+
+When the owner says “派发出题下属”, “启动一批题目”, “create producers”, or
+an equivalent request in the current chat, do not merely print CLI commands for
+the owner to copy. The supervisor must execute the internal ledger commands,
+then dispatch the returned jobs through the active transport:
+
+- In OpenCode, use the native Task tool in the current session. Give each Task
+  its immutable prompt, employee ID, dispatch ID and exclusive `job_root`, then
+  collect its report before advancing the campaign.
+- In Orca, use the headless Orca CLI from the chat agent: check
+  `orca status --json`, create or reuse the Run, create Tasks, start supervised
+  workers, and consume `worker_done`, `escalation` and `question` messages.
+
+The owner should see a concise dispatch summary, not a request to run
+`employee-hire` or `supervisor-dispatch` manually. Ask the owner only for a
+missing policy, resource approval, or a human decision gate. If Orca is not
+running, report the infrastructure blocker and the exact `orca serve` remedy;
+do not classify it as a producer or task failure. Read
+`edgebench-task-generator/references/supervisor-protocol.md` for the command
+mapping and receipt requirements.
+
 At the start of a new authoring request, collect or locate:
 
 - the user's Benchmark requirements document;

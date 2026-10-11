@@ -5,6 +5,12 @@ coupling it to a desktop application. The supervisor may be the OpenCode main
 session, a headless Orca runtime, or an adapter that consumes the same JSON
 dispatch and receipt files.
 
+The owner-facing interface is chat-first. The owner asks the supervisor to
+start, scale, pause or replace workers; the supervisor invokes the ledger and
+transport commands internally. The shell commands shown below are the
+deterministic implementation interface and recovery interface, not a request
+for the owner to copy them manually.
+
 ## Authority model
 
 ```text
@@ -186,3 +192,18 @@ The supervisor uses the JSON dispatch produced by this Skill and maps it to
 Orca's `run-create`, `task-create`, `worker-start`, `check`, `send`, and
 `worker-stop` commands. A missing Orca executable is an unavailable transport,
 not evidence that a task or worker failed.
+
+In an Orca chat, the normal interaction is therefore:
+
+```text
+owner:  "派发 10 个出题下属，先做 systems/software"
+agent:  checks Orca → creates/reuses a Run → creates Tasks
+        → starts supervised workers → waits for worker_done/escalation/question
+        → updates the Skill ledger → reports the batch summary
+```
+
+In an OpenCode chat the same request causes the supervisor to call the internal
+ledger commands and dispatch native Tasks in the current session. It must not
+respond with only a list of commands. If a required policy or resource limit is
+missing, it asks one focused question; if the runtime is unavailable, it reports
+the exact infrastructure blocker and does not mark the producer failed.

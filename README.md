@@ -66,6 +66,12 @@ orca skills install --skill orca-cli --skill orchestration
 The full authority, QC, replacement, checkpoint and `orca orchestration`
 mapping is in `edgebench-task-generator/references/supervisor-protocol.md`.
 
+The intended owner interaction is chat-first: say “派发 10 个出题下属” in
+OpenCode or Orca. The supervisor Agent runs the ledger and dispatch commands
+internally, starts OpenCode Tasks or Orca supervised workers, and reports only
+the resulting job summary and approval questions. The CLI commands are the
+automation/recovery interface, not a requirement for the owner to copy and run.
+
 Use `rehearsal` mode for production-line tests. Rehearsal artifacts are private
 and never count as Seed promotion, formal task delivery, model rollout or
 customer acceptance.

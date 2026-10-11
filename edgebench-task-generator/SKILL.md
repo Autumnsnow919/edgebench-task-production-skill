@@ -39,6 +39,16 @@ resource and provider limits. Fired employees and their child trees are
 archived, never deleted. A replacement gets a new employee identity and a new
 Seed. See `references/supervisor-protocol.md` for the complete contract.
 
+This is a **chat-first** workflow. When the owner asks the supervisor to start
+or scale production, the active Agent executes the ledger commands and dispatch
+calls itself; it must not return a copy-paste command list as the result. In an
+OpenCode chat, dispatch native Tasks in the current session. In an Orca chat,
+use `orca orchestration run-create`, `task-create`, `worker-start` and
+`check`/`send` through the CLI. Return only the batch summary, job IDs,
+checkpoint alerts and questions requiring owner approval. A command-line
+invocation remains available for automation and recovery, but is not the
+normal owner interaction.
+
 The owner may invoke the Skill in `rehearsal` mode to test the production line.
 Rehearsal may discover and pin Seeds, run bounded micro-prototypes and verify
 gates, but its files stay outside customer inputs and do not promote a Seed,
