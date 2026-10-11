@@ -400,6 +400,95 @@ def status(workspace: str | Path) -> tuple[dict, int]:
     }, 0
 
 
+def _last_gate(root: Path, employee_id: str) -> dict | None:
+    gate_dir = root / "supervision/rollout-gates" / employee_id
+    gates = sorted(gate_dir.glob("attempt-*/gate.json")) if gate_dir.is_dir() else []
+    if not gates:
+        return None
+    return common.load_json(gates[-1])
+
+
+def _report_summary(employee: dict) -> dict | None:
+    receipt = employee.get("last_report")
+    if not isinstance(receipt, dict):
+        return None
+    value = {
+        "status": receipt.get("report_status"),
+        "recorded_at": receipt.get("recorded_at"),
+        "report_path": receipt.get("report_path"),
+        "report_sha256": receipt.get("report_sha256"),
+    }
+    path = receipt.get("report_path")
+    if isinstance(path, str):
+        report_path = Path(path)
+        if report_path.is_file() and not report_path.is_symlink():
+            try:
+                report = common.load_json(report_path)
+                if _text(report.get("summary")):
+                    value["summary"] = report["summary"][:2000]
+                if _text(report.get("question")):
+                    value["question"] = report["question"][:1000]
+            except common.PipelineError:
+                value["summary_status"] = "unreadable"
+    return value
+
+
+def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[dict, int]:
+    root, campaign = _root(workspace)
+    manifest = _load_manifest(root, campaign)
+    values = _employees(root)
+    if employee_id is not None:
+        selected = _employee(root, employee_id)
+        values = [selected]
+    rows = []
+    alerts = []
+    for employee in values:
+        gate = _last_gate(root, employee["employee_id"])
+        row = {
+            "employee_id": employee["employee_id"],
+            "parent_id": employee.get("parent_id"),
+            "role": employee.get("role"),
+            "transport": employee.get("transport"),
+            "task_id": employee.get("task_id"),
+            "seed_id": employee.get("seed_id"),
+            "status": employee.get("employment_status"),
+            "job_root": employee.get("job_root"),
+            "last_dispatch_id": employee.get("last_dispatch_id"),
+            "report": _report_summary(employee),
+            "qc": employee.get("last_qc_decision"),
+            "rollout_gate": gate,
+        }
+        if employee.get("employment_status") in {
+            "needs-owner-decision", "replacement-required", "repair-required",
+        }:
+            alerts.append({
+                "kind": "employee-state",
+                "employee_id": employee["employee_id"],
+                "status": employee["employment_status"],
+            })
+        if gate is not None and gate.get("status") not in {"CONTINUE", "ACCEPT"}:
+            alerts.append({
+                "kind": "rollout-gate",
+                "employee_id": employee["employee_id"],
+                "status": gate.get("status"),
+                "action": gate.get("action"),
+            })
+        rows.append(row)
+    return {
+        "schema_version": 1,
+        "campaign": str(root),
+        "generated_at": common.utc_now(),
+        "capacity": {
+            "active": _active_count(root),
+            "max_concurrent": manifest["max_concurrent"],
+            "available": max(0, manifest["max_concurrent"] - _active_count(root)),
+        },
+        "employees": rows,
+        "alerts": alerts,
+        "owner_action_required": bool(alerts),
+    }, 0
+
+
 def fire(workspace: str | Path, employee_id: str, reason: str, evidence: str | Path | None = None) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     _load_manifest(root, campaign)

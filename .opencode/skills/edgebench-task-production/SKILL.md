@@ -76,6 +76,11 @@ do not classify it as a producer or task failure. Read
 `edgebench-task-generator/references/supervisor-protocol.md` for the command
 mapping and receipt requirements.
 
+When the owner asks to “看下属”, “汇报进度”, “show the team”, or names one
+employee, run `supervisor-dashboard` internally. Present status, last report,
+QC/rollout checkpoint and alerts in chat. Do not expose raw credentials or dump
+all worker logs by default; offer a focused worker read only when needed.
+
 At the start of a new authoring request, collect or locate:
 
 - the user's Benchmark requirements document;

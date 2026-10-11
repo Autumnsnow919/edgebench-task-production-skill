@@ -11,6 +11,20 @@ transport commands internally. The shell commands shown below are the
 deterministic implementation interface and recovery interface, not a request
 for the owner to copy them manually.
 
+To inspect the team from chat, the supervisor runs the dashboard internally:
+
+```bash
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  supervisor-dashboard CAMPAIGN
+```
+
+The result is a compact view of every employee's state, parent, task/Seed,
+last dispatch, last heartbeat/report, QC decision, rollout gate and alert. A
+single employee can be expanded with `--employee-id`. In OpenCode, the parent
+session can additionally inspect the selected native Task's result. In Orca,
+the supervisor maps the selected dispatch to `worker-show`/`worker-read` and
+waits on `orchestration check`; the owner does not need to open a terminal pane.
+
 ## Authority model
 
 ```text
@@ -51,7 +65,11 @@ employee's work tree or evidence.
 Supported transport modes are:
 
 - `opencode-task`: the current OpenCode main session dispatches the named
-  native Task or an equivalent `opencode run` process;
+  native Task or an equivalent `opencode run` process. The bundle includes
+  `edgebench-supervisor`, `edgebench-producer`, `edgebench-qc`,
+  `edgebench-seed-worker`, `edgebench-prototype-worker` and
+  `edgebench-rollout` role agents when the full `.opencode/` directory is
+  installed;
 - `orca-cli`: a headless Orca coordinator maps the dispatch JSON to
   `orca orchestration worker-start` and consumes worker messages;
 - `dual`: either transport may be selected per employee.

@@ -49,6 +49,11 @@ checkpoint alerts and questions requiring owner approval. A command-line
 invocation remains available for automation and recovery, but is not the
 normal owner interaction.
 
+For monitoring requests, run `supervisor-dashboard` internally and report the
+employee table plus only actionable alerts. Use the OpenCode child-session
+result or Orca `worker-show`/`worker-read` only for the named employee; the
+supervisor should not flood the owner with every raw transcript.
+
 The owner may invoke the Skill in `rehearsal` mode to test the production line.
 Rehearsal may discover and pin Seeds, run bounded micro-prototypes and verify
 gates, but its files stay outside customer inputs and do not promote a Seed,

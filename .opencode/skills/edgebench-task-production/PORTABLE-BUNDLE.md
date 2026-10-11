@@ -8,8 +8,10 @@ source documents, and the `rl-task-qc` final static gate.
 
 Copy the bundle's `.opencode/skills/edgebench-task-production/SKILL.md` to the
 project's `.opencode/skills/edgebench-task-production/SKILL.md`, or copy the
-entire bundle root into a project and use the included relative layout. Start a
-new OpenCode session after installation so the Skill registry reloads it.
+entire bundle root into a project and use the included relative layout. For
+chat-first hierarchical dispatch, copy the entire `.opencode/` directory so
+the role agents under `.opencode/agents/` are also available. Start a new
+OpenCode session after installation so the Skill and Agent registry reloads.
 
 ## Run from this bundle root
 
@@ -57,6 +59,8 @@ replacement rules.
 In normal use, the owner asks the supervisor in chat to dispatch workers. The
 supervisor runs these commands internally and invokes native OpenCode Tasks or
 Orca's supervised workers; the owner does not need to copy the CLI commands.
+Say “汇报所有下属” or “查看 producer-001” to receive the dashboard and a
+focused worker summary.
 
 Use `rehearsal` mode for production-line tests. Rehearsal artifacts are private
 and never count as Seed promotion, formal task delivery, model rollout or

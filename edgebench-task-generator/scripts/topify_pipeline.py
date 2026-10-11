@@ -256,6 +256,9 @@ def parser() -> argparse.ArgumentParser:
     employee_hire.add_argument("--replacement-of")
     employee_status = commands.add_parser("employee-status", help="show supervisor employees and alerts")
     employee_status.add_argument("workspace", type=Path)
+    supervisor_dashboard = commands.add_parser("supervisor-dashboard", help="show chat-friendly worker progress and alerts")
+    supervisor_dashboard.add_argument("workspace", type=Path)
+    supervisor_dashboard.add_argument("--employee-id")
     employee_fire = commands.add_parser("employee-fire", help="record a controlled employee termination")
     employee_fire.add_argument("workspace", type=Path)
     employee_fire.add_argument("--employee-id", required=True)
@@ -633,6 +636,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "employee-status":
             report, code = topify_supervisor.status(args.workspace)
+        elif args.command == "supervisor-dashboard":
+            report, code = topify_supervisor.dashboard(args.workspace, args.employee_id)
         elif args.command == "employee-fire":
             report, code = topify_supervisor.fire(
                 args.workspace, args.employee_id, args.reason, args.evidence

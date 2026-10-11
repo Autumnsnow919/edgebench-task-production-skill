@@ -80,6 +80,23 @@ class SupervisorProtocolTests(unittest.TestCase):
         self.assertEqual(infra["status"], "INFRA_FAILURE")
         self.assertEqual(infra["action"], "retry_same_frozen_task")
 
+    def test_dashboard_exposes_capacity_and_worker_summary(self):
+        topify_supervisor.hire(
+            self.campaign, "producer-001", "producer", "opencode-task",
+            seed_id="systems-software-engineering/cpython/lead-001",
+        )
+        report_path = self.root / "worker.json"
+        report_path.write_text(json.dumps({
+            "status": "heartbeat",
+            "summary": "currently measuring the executable prototype",
+        }))
+        topify_supervisor.report(self.campaign, "producer-001", report_path)
+        dashboard, code = topify_supervisor.dashboard(self.campaign)
+        self.assertEqual(code, 0)
+        self.assertEqual(dashboard["capacity"]["active"], 1)
+        self.assertEqual(dashboard["employees"][0]["report"]["status"], "heartbeat")
+        self.assertIn("measuring", dashboard["employees"][0]["report"]["summary"])
+
 
 if __name__ == "__main__":
     unittest.main()
