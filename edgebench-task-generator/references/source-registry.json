@@ -1,0 +1,348 @@
+{
+  "acceptance_note": "Discovery sources create leads only. Artifact-specific provenance, rights, hashes, deduplication, executable prototypes, and DOCX evidence remain mandatory.",
+  "checked_at": "2026-09-24",
+  "dedup_sources": [
+    {
+      "id": "EdgeBench",
+      "url": "https://github.com/ByteDance-Seed/EdgeBench"
+    },
+    {
+      "id": "MLS-Bench",
+      "url": "https://github.com/ContextualAI/mls-bench"
+    },
+    {
+      "id": "Terminal-Bench",
+      "url": "https://github.com/laude-institute/terminal-bench"
+    },
+    {
+      "id": "GDPval",
+      "url": "https://openai.com/index/gdpval/"
+    }
+  ],
+  "schema_version": 1,
+  "sources": [
+    {
+      "candidate_transformations": [
+        "cross-version compatibility repair",
+        "behavioral reimplementation",
+        "recovery or performance optimization"
+      ],
+      "category": "systems-software-engineering",
+      "channel": "upstream-change",
+      "cautions": [
+        "public-solution-contamination-review",
+        "transitive-license-review"
+      ],
+      "id": "cpython-issues",
+      "artifact_hosts": [
+        "github.com",
+        "raw.githubusercontent.com",
+        "codeload.github.com"
+      ],
+      "object_kinds": [
+        "repository",
+        "issue",
+        "release"
+      ],
+      "official_url": "https://github.com/python/cpython/issues",
+      "retrieval_status": "unverified",
+      "rights_policy": "per-artifact"
+    },
+    {
+      "candidate_transformations": [
+        "held-out calibration",
+        "inverse-problem fitting",
+        "robust forecasting"
+      ],
+      "category": "scientific-ml",
+      "channel": "public-data-research",
+      "cautions": [
+        "dataset-specific-license",
+        "dataset-leakage"
+      ],
+      "id": "uci-datasets",
+      "artifact_hosts": [
+        "archive.ics.uci.edu"
+      ],
+      "object_kinds": [
+        "dataset",
+        "metadata"
+      ],
+      "official_url": "https://archive.ics.uci.edu/",
+      "retrieval_status": "reachable",
+      "rights_policy": "per-artifact"
+    },
+    {
+      "candidate_transformations": [
+        "filing reconciliation",
+        "taxonomy validation",
+        "cross-document consistency repair"
+      ],
+      "category": "professional-knowledge-work",
+      "channel": "expert-workflow",
+      "cautions": [
+        "embedded-data-rights",
+        "personal-data",
+        "retrieval-blocked"
+      ],
+      "id": "sec-edgar",
+      "artifact_hosts": [
+        "www.sec.gov",
+        "data.sec.gov"
+      ],
+      "object_kinds": [
+        "filing",
+        "taxonomy",
+        "schema"
+      ],
+      "official_url": "https://www.sec.gov/search-filings/edgar-application-programming-interfaces",
+      "retrieval_status": "blocked",
+      "rights_policy": "per-artifact"
+    },
+    {
+      "candidate_transformations": [
+        "new instance distribution",
+        "online adaptation",
+        "hybrid solver optimization"
+      ],
+      "category": "combinatorial-optimization",
+      "channel": "original-generator",
+      "cautions": [
+        "instance-license-review",
+        "published-solution-leakage",
+        "generic-solver-saturation"
+      ],
+      "id": "minizinc-challenge",
+      "artifact_hosts": [
+        "www.minizinc.org",
+        "github.com",
+        "raw.githubusercontent.com"
+      ],
+      "object_kinds": [
+        "instance",
+        "model",
+        "solver-result"
+      ],
+      "official_url": "https://www.minizinc.org/challenge/",
+      "retrieval_status": "reachable",
+      "rights_policy": "per-artifact"
+    },
+    {
+      "candidate_transformations": [
+        "theorem-family formalization",
+        "dependency completion",
+        "API migration"
+      ],
+      "category": "formal-math-theorem-proving",
+      "channel": "formalization-gap",
+      "cautions": [
+        "existing-proof-contamination",
+        "version-sensitive-dependencies"
+      ],
+      "id": "mathlib-issues",
+      "artifact_hosts": [
+        "github.com",
+        "codeload.github.com",
+        "raw.githubusercontent.com"
+      ],
+      "object_kinds": [
+        "repository",
+        "issue",
+        "blueprint"
+      ],
+      "official_url": "https://github.com/leanprover-community/mathlib4/issues",
+      "retrieval_status": "reachable",
+      "rights_policy": "per-artifact"
+    },
+    {
+      "candidate_transformations": [
+        "held-out policy optimization",
+        "scenario adaptation",
+        "constraint-aware planning"
+      ],
+      "category": "interactive-games-simulators",
+      "channel": "simulator-scenario",
+      "cautions": [
+        "asset-license-review",
+        "nondeterminism",
+        "reward-exploit"
+      ],
+      "id": "gymnasium-environments",
+      "artifact_hosts": [
+        "gymnasium.farama.org",
+        "github.com",
+        "raw.githubusercontent.com"
+      ],
+      "object_kinds": [
+        "simulator",
+        "environment",
+        "scenario"
+      ],
+      "official_url": "https://gymnasium.farama.org/",
+      "retrieval_status": "reachable",
+      "rights_policy": "per-artifact"
+    },
+    {
+      "id": "sqlglot-upstream",
+      "category": "systems-software-engineering",
+      "channel": "upstream-change",
+      "official_url": "https://github.com/tobymao/sqlglot",
+      "artifact_hosts": [
+        "github.com",
+        "codeload.github.com",
+        "raw.githubusercontent.com"
+      ],
+      "object_kinds": [
+        "repository",
+        "release"
+      ],
+      "candidate_transformations": [
+        "behavioral reimplementation",
+        "cross-version compatibility repair",
+        "dialect feature reconstruction"
+      ],
+      "cautions": [
+        "public-solution-contamination-review",
+        "upstream-license-review"
+      ],
+      "retrieval_status": "unverified",
+      "rights_policy": "per-artifact"
+    },
+    {
+      "id": "ihtc2024-ihtp",
+      "category": "combinatorial-optimization",
+      "channel": "public-data-research",
+      "official_url": "https://ihtc2024.github.io/ihtp/index.html",
+      "artifact_hosts": [
+        "ihtc2024.github.io",
+        "github.com",
+        "raw.githubusercontent.com",
+        "codeload.github.com"
+      ],
+      "object_kinds": [
+        "dataset",
+        "repository",
+        "document"
+      ],
+      "candidate_transformations": [
+        "long-horizon re-planning under disruptions",
+        "feasibility restoration and cost repair",
+        "rolling-horizon multi-week scheduling"
+      ],
+      "cautions": [
+        "published-competition-solutions-review",
+        "instance-license-review"
+      ],
+      "retrieval_status": "unverified",
+      "rights_policy": "per-artifact"
+    },
+    {
+      "id": "ihtc2024-validator",
+      "category": "systems-software-engineering",
+      "channel": "upstream-change",
+      "official_url": "https://github.com/ihtc2024/ihtc2024.github.io",
+      "artifact_hosts": [
+        "raw.githubusercontent.com",
+        "github.com"
+      ],
+      "object_kinds": [
+        "repository",
+        "document"
+      ],
+      "candidate_transformations": [
+        "offline behavioral reimplementation of a pinned official validator",
+        "constraint and weighted-cost conformance engineering"
+      ],
+      "cautions": [
+        "published-validator-source-contamination-review",
+        "official-instance-redistribution-review"
+      ],
+      "retrieval_status": "unverified",
+      "rights_policy": "per-artifact"
+    },
+    {
+      "id": "farama-minigrid",
+      "category": "interactive-games-simulators",
+      "channel": "simulator-scenario",
+      "official_url": "https://github.com/Farama-Foundation/Minigrid",
+      "artifact_hosts": [
+        "github.com",
+        "codeload.github.com",
+        "raw.githubusercontent.com"
+      ],
+      "object_kinds": [
+        "repository",
+        "simulator",
+        "scenario"
+      ],
+      "candidate_transformations": [
+        "observation-only memory and navigation policy",
+        "held-out procedural scenario adaptation",
+        "partial-observation exploration with resource constraints"
+      ],
+      "cautions": [
+        "bundled-expert-bot-contamination-review",
+        "observation-only-policy-boundary",
+        "generic-exploration-baseline-saturation"
+      ],
+      "retrieval_status": "reachable",
+      "rights_policy": "per-artifact"
+    },
+    {
+      "id": "deepmind-hanabi",
+      "category": "interactive-games-simulators",
+      "channel": "simulator-scenario",
+      "official_url": "https://github.com/google-deepmind/hanabi-learning-environment",
+      "artifact_hosts": [
+        "github.com",
+        "codeload.github.com",
+        "raw.githubusercontent.com"
+      ],
+      "object_kinds": [
+        "repository",
+        "simulator",
+        "scenario"
+      ],
+      "candidate_transformations": [
+        "cooperative hidden-information policy over held-out decks",
+        "belief-aware card play and resource budgeting",
+        "communication and partner-adaptation strategy"
+      ],
+      "cautions": [
+        "archived-upstream-build-and-arm-portability",
+        "hidden-hand-state-leakage-review",
+        "published-rule-bot-contamination-review"
+      ],
+      "retrieval_status": "reachable",
+      "rights_policy": "per-artifact"
+    },
+    {
+      "id": "numbbo-coco",
+      "category": "combinatorial-optimization",
+      "channel": "original-generator",
+      "official_url": "https://github.com/numbbo/coco",
+      "artifact_hosts": [
+        "github.com",
+        "codeload.github.com",
+        "raw.githubusercontent.com"
+      ],
+      "object_kinds": [
+        "repository",
+        "suite",
+        "benchmark"
+      ],
+      "candidate_transformations": [
+        "budgeted mixed-integer black-box solver design",
+        "adaptive discrete-continuous search across held-out function instances",
+        "multi-function policy optimization with measured target gaps"
+      ],
+      "cautions": [
+        "public-example-solver-contamination-review",
+        "generic-cma-and-local-search-saturation",
+        "optimum-metadata-and-private-instance-isolation"
+      ],
+      "retrieval_status": "reachable",
+      "rights_policy": "per-artifact"
+    }
+  ]
+}

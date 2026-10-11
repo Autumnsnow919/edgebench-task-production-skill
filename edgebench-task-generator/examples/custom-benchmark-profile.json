@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "profile_id": "custom-benchmark",
+  "benchmark": "Custom Benchmark",
+  "requirements_precedence": [
+    "user_requirements",
+    "benchmark_requirements",
+    "vendor_requirements",
+    "profile_defaults"
+  ],
+  "delivery": {
+    "formats": ["sforge-only", "harbor"],
+    "default_format": null,
+    "rollout_harness": "sforge"
+  },
+  "capabilities": {
+    "reward_types": ["bounded_continuous"],
+    "artifact_mode": "single-file",
+    "architectures": ["linux/amd64", "linux/arm64"],
+    "quality_ids": ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7"]
+  },
+  "thresholds": {
+    "interaction_budget_seconds_minimum": 1800,
+    "interaction_budget_seconds_preferred": 7200,
+    "frontier_trials_minimum": 1,
+    "reference_repeats": 2,
+    "architectures_required": ["linux/amd64"],
+    "q_review_required": ["Q1", "Q2", "Q3", "Q4", "Q5"],
+    "q_review_not_required": ["Q6", "Q7", "Q8"]
+  },
+  "gate_ids": [
+    "G_contract", "G_rubric", "G_endpoints", "G_difficulty", "G_semantics",
+    "G_feedback", "G_security", "G_repro", "G_build", "G_pre_parity", "G_score_audit"
+  ],
+  "checks": {
+    "continuous_reward": false,
+    "structured_score": true,
+    "native_cross_architecture": false,
+    "source_rights_dedup": "user_requirements",
+    "sforge_dual_entry": "not_required_by_user"
+  }
+}

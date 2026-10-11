@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "task_sha256": "replace-with-current-64-character-task-digest",
+  "reviewer_role": "main-agent",
+  "english": {
+    "scenario": "Improve a deterministic allocation plan against weighted targets and capacity constraints.",
+    "consequence": "Poor plans leave high-priority demand uncovered while consuming scarce capacity.",
+    "why_long": "The agent can repeatedly diagnose uncovered targets, rebalance capacity, and submit improved plans."
+  },
+  "chinese": {
+    "scenario": "改进同时受加权目标与容量约束的确定性分配计划。",
+    "consequence": "低质量计划会遗漏高优先级需求，同时占用稀缺容量。",
+    "why_long": "智能体可反复诊断未覆盖目标、调整容量并提交改进方案。"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "category": "combinatorial-optimization",
+  "benchmark_profile": "edgebench-v1",
+  "interaction_budget_seconds": 10800,
+  "plugin": "mini_continuous",
+  "reference_mode": "reference",
+  "resources": {
+    "agent_cpu": 2,
+    "agent_memory_mb": 2048,
+    "architectures": [
+      "linux/amd64",
+      "linux/arm64"
+    ],
+    "gpu_types": [],
+    "scoring_uses_gpu": false,
+    "verifier_cpu": 1,
+    "verifier_memory_mb": 1024
+  },
+  "rollout": {
+    "agent": "codex",
+    "effort": "high",
+    "model": "gpt-5.6-sol",
+    "provider": "dmx"
+  },
+  "schema_version": 1,
+  "scoring": {
+    "baseline": 0,
+    "batch_mechanism": "run-once",
+    "constants": {
+      "baseline": 0,
+      "upper": 100
+    },
+    "direction": "maximize",
+    "formula": "score=100*(raw-baseline)/(upper-baseline); reward=score/100",
+    "raw_metric": "valid weighted target coverage",
+    "upper": 100,
+    "upper_basis": "Measured deterministic reference snapshot"
+  },
+  "seed": 17,
+  "source": {
+    "dedup_targets": [
+      "EdgeBench",
+      "MLS-Bench",
+      "Terminal-Bench",
+      "GDPval"
+    ],
+    "license": "Apache-2.0",
+    "mode": "original-generator",
+    "public_datasets": [],
+    "redistribution_confirmation": "Author-owned generated fixture may be redistributed to Topify.",
+    "upstream_projects": []
+  },
+  "task_id": "topify/continuous-mini",
+  "verifier_timeout_seconds": 60
+}

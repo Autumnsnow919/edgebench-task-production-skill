@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "batch_id": "morrow-lab-edgebench-sample-001",
+  "delivery_format": "sforge-only",
+  "delivery_language": "en",
+  "workspaces": [
+    "/absolute/path/to/completed-task-workspace-a",
+    "/absolute/path/to/completed-task-workspace-b"
+  ]
+}

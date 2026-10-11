@@ -1,0 +1,20 @@
+{
+  "capture_id": "uci-example-20260924",
+  "captured_at": "2026-09-24T12:00:00Z",
+  "records": [
+    {
+      "artifact_sha256": null,
+      "kind": "dataset",
+      "license": null,
+      "offline_mirror": null,
+      "project": "UCI Machine Learning Repository",
+      "record_id": "replace-with-dataset-id",
+      "revision": null,
+      "title": "Replace with captured dataset title",
+      "url": "https://archive.ics.uci.edu/dataset/replace-me"
+    }
+  ],
+  "retrieval_url": "https://archive.ics.uci.edu/",
+  "schema_version": 1,
+  "source_id": "uci-datasets"
+}

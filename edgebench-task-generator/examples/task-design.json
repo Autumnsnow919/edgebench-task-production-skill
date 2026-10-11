@@ -1,0 +1,66 @@
+{
+  "ablation_plan": [
+    {
+      "expected_effect": "Removing capacity coupling lets greedy assignment saturate coverage, collapsing the score gap between starter and upper.",
+      "mechanism_removed": "shared capacity constraints across assignments",
+      "name": "decoupled-capacity"
+    },
+    {
+      "expected_effect": "Removing target weighting makes all lawful full-cover plans equivalent, so the interior lever stops improving the score.",
+      "mechanism_removed": "weighted target prioritization",
+      "name": "flat-targets"
+    },
+    {
+      "expected_effect": "Keeping assignments fixed after repair removes most of the interior-to-upper score span.",
+      "mechanism_removed": "iterative repair of capacity conflicts",
+      "name": "no-repair"
+    }
+  ],
+  "binary_only": false,
+  "cheap_baseline": {
+    "control_id": "simple-greedy",
+    "domain_fit": "Allocation tasks of this shape admit off-the-shelf greedy and local-search heuristics; the baseline mirrors what a competent practitioner tries first.",
+    "method": "Deterministic greedy-by-weight with one pass of swap-based local repair, bounded to a small iteration budget."
+  },
+  "coupling_mechanism": "Assignments compete for shared capacity while weighted targets force trade-offs, so fixing one conflict shifts violation pressure elsewhere and local greedy moves cannot jointly optimize coverage and capacity.",
+  "expected_repeat_noise": 0,
+  "expected_verifier_end_to_end_seconds": 2,
+  "feedback": {
+    "actionable_signals": [
+      "invalid assignment ids",
+      "uncovered target ids",
+      "capacity overflow"
+    ],
+    "development_split": "/workspace/dev/instances.json",
+    "local_scorer": "/workspace/tools/score_dev.py",
+    "uses_private_answers": false
+  },
+  "improvement_levers": [
+    "cover additional valid targets",
+    "replace low-value assignments with higher-value assignments",
+    "repair capacity conflicts without discarding valid work"
+  ],
+  "interior_candidates": [
+    {
+      "expected_relation": "baseline < starter < upper",
+      "name": "starter"
+    },
+    {
+      "expected_relation": "starter < greedy < upper",
+      "name": "greedy"
+    }
+  ],
+  "long_horizon_reason": "The agent can repeatedly diagnose uncovered targets, rebalance capacity, and submit improved plans.",
+  "planned_submission_count": 20,
+  "real_work": "Improve a deterministic allocation plan against weighted targets and capacity constraints.",
+  "real_world_consequence": "Poor plans leave high-priority demand uncovered while consuming scarce capacity.",
+  "requires_waiting": false,
+  "schema_version": 1,
+  "snapshot_artifacts": [
+    "/workspace/solution.json"
+  ],
+  "upper": {
+    "basis_type": "measured-reference",
+    "description": "Deterministic exhaustive reference on the generated miniature instances."
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "batch_id": "edgebench-local-sample",
+  "delivery_format": "harbor",
+  "workspaces": ["/absolute/path/to/real-frozen-workspace"],
+  "vendor_name": "morrow_lab",
+  "dataset_name": "edgebench",
+  "delivery_date": "2026-09-30",
+  "delivery_language": "en"
+}

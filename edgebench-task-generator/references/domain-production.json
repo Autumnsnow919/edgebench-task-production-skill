@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "planning_basis": "Topify EdgeBench DOCX section 2, six categories across the first 100 tasks; targets are planning defaults, not acceptance thresholds",
+  "domains": {
+    "systems-software-engineering": {
+      "target_count": 26,
+      "source_pools": ["pinned infrastructure and runtime repositories", "standards/RFC conformance suites", "storage, search, compiler and codec regressions"],
+      "task_mechanisms": ["cross-version compatibility repair with held-out behavior", "bounded-throughput implementation and regression recovery", "protocol or data-structure reimplementation from a source-grounded contract"],
+      "snapshot_artifacts": ["source tree or patch under /workspace", "compiled component and configuration generated from submitted sources"],
+      "local_feedback": ["public conformance traces", "performance profiles and crash reproducers", "small differential tests"],
+      "cheap_controls": ["stock upstream implementation or searchable published fix", "off-the-shelf codec/library wrapper", "mechanical port or single-test patch"],
+      "reject_if": ["published solution reaches the reference without real work", "only one binary test can change the reward", "a build artifact depends on mutable outside-network state"]
+    },
+    "scientific-ml": {
+      "target_count": 25,
+      "source_pools": ["licensed scientific and government datasets", "reproducibility packages", "signal, inverse-problem and control simulators"],
+      "task_mechanisms": ["inverse-parameter recovery with physical residuals", "held-out model calibration and robust forecasting", "policy or solver tuning across seeded distributions"],
+      "snapshot_artifacts": ["model weights or solver code under /workspace", "configuration and predictions derived only from submitted files"],
+      "local_feedback": ["public development-split errors", "residual and constraint diagnostics", "training/validation metric breakdowns"],
+      "cheap_controls": ["mean/majority or persistence predictor", "linear model or standard public pretrained estimator", "library default solver without tuning"],
+      "reject_if": ["a constant or pretrained shortcut nearly reaches the reference", "private labels leak through the development split", "metric noise obscures useful improvement"]
+    },
+    "professional-knowledge-work": {
+      "target_count": 18,
+      "source_pools": ["official filing and taxonomy schemas", "public standards and regulations", "author-generated expert-workflow records"],
+      "task_mechanisms": ["cross-document financial or audit reconciliation", "evidence-backed decision and risk calibration", "structured educational or clinical evidence synthesis with objective consistency checks"],
+      "snapshot_artifacts": ["structured report and its cited evidence under /workspace", "reconciled ledger, spreadsheet or schema-valid decisions"],
+      "local_feedback": ["cross-footing and schema errors", "source-to-claim traceability", "material-rule and arithmetic violations"],
+      "cheap_controls": ["schema-only template filling", "copying numbers from one source without reconciliation", "generic language-model prose without evidence validation"],
+      "reject_if": ["subjective prose quality dominates the score", "a template earns reference-level credit", "rights or personal-data basis remains unknown at promotion"]
+    },
+    "combinatorial-optimization": {
+      "target_count": 12,
+      "source_pools": ["licensed routing and scheduling benchmarks", "MiniZinc, OR-Library and graph-instance generators", "original coherent online allocation models"],
+      "task_mechanisms": ["resource-constrained scheduling with genuine global mode trade-offs", "routing or packing with certified feasibility and cost", "adaptive search under partially observed, irreversible decisions"],
+      "snapshot_artifacts": ["solver implementation or full candidate schedule under /workspace", "deterministic action policy and configuration"],
+      "local_feedback": ["per-instance feasibility reasons", "objective and certified bound gaps", "improvement traces across unseen instances"],
+      "cheap_controls": ["greedy earliest-deadline or first-fit", "untuned OR-Tools/CP-SAT or other available generic solver", "short generic local search or beam search"],
+      "reject_if": ["a few-minute generic solver approaches the attainable upper", "an all-or-nothing case cliff creates the entire learning curve", "repeating the same gadget or adding records is the only difficulty change"]
+    },
+    "formal-math-theorem-proving": {
+      "target_count": 10,
+      "source_pools": ["pinned Lean/mathlib issue and blueprint sets", "licensed papers with unformalized dependency families", "proof-assistant migration and library gaps"],
+      "task_mechanisms": ["weighted family of dependent Lean theorems", "reusable definitions and lemmas unlocking multiple goals", "cross-version formalization or tactic repair"],
+      "snapshot_artifacts": ["Lean project source files under /workspace", "proof modules and pinned toolchain configuration"],
+      "local_feedback": ["Lean compiler diagnostics", "open proof goals and dependency map", "per-theorem checked progress"],
+      "cheap_controls": ["simp/aesop and stock automation only", "renaming an already public proof", "single copied theorem from an existing formalization"],
+      "reject_if": ["one theorem forms a binary cliff", "proofs already exist under another name", "toolchain or source assumptions are unpinned"]
+    },
+    "interactive-games-simulators": {
+      "target_count": 9,
+      "source_pools": ["licensed Gymnasium/PettingZoo/OpenSpiel environments", "transport and economic simulators", "seeded original games with interpretable dynamics"],
+      "task_mechanisms": ["stateful policy improvement over deterministic held-out episodes", "planning with delayed observations and constrained actions", "multi-agent resource and feedback adaptation"],
+      "snapshot_artifacts": ["policy source or configuration under /workspace", "replayable agent code evaluated from a clean snapshot"],
+      "local_feedback": ["public episode replays", "per-event reward and constraint reports", "failure-state explanations"],
+      "cheap_controls": ["random legal policy", "short-horizon greedy planner", "unmodified library example agent"],
+      "reject_if": ["reward depends on live process state or waiting", "one exploitable action saturates reward", "public scenario replay reveals private episodes"]
+    }
+  }
+}
