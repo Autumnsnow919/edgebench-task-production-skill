@@ -91,13 +91,14 @@ ledger and SSE updates, with separate owner/supervisor tokens:
 python3 edgebench-task-generator/scripts/topify_pipeline.py \
   supervisor-web \
   --scan-root /var/lib/edgebench/campaigns \
-  --host 127.0.0.1 --port 8787 \
+  --host 0.0.0.0 --port 8787 \
   --owner-token-file /etc/edgebench/owner.token
 ```
 
 The service auto-discovers multiple separated Benchmark supervisors from
-`supervisor-stamp.json` files below the scan root. It binds to localhost and
-should be exposed through a TLS reverse proxy. Keep the token file at mode
+`supervisor-stamp.json` files below the scan root and listens on all interfaces.
+Use the server IP and port 8787 for internal access; expose it through a TLS
+reverse proxy for encrypted access. Keep the token file at mode
 `0600` and run this command under systemd/supervisord for persistence. See
 `edgebench-task-generator/references/supervisor-web.md` for controls and API.
 

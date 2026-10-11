@@ -20,7 +20,7 @@ stamped campaigns below a scan root; no hand-maintained registry is required:
 python3 edgebench-task-generator/scripts/topify_pipeline.py \
   supervisor-web \
   --scan-root /var/lib/edgebench/campaigns \
-  --host 127.0.0.1 --port 8787 \
+  --host 0.0.0.0 --port 8787 \
   --owner-token-file /etc/edgebench/owner.token
 ```
 
@@ -30,9 +30,10 @@ recognizes only valid Topify campaign structures, creates a stamp, and marks it
 `legacy-adopted / needs_owner_review`; it does not silently treat arbitrary
 task directories as production supervisors.
 
-The recommended production mode binds to localhost and places Nginx/Caddy/TLS
-in front of it. If a trusted internal reverse proxy is on another host, bind
-to `0.0.0.0` explicitly instead. The token files must be owner-only (`0600`);
+The service binds to every network interface, so external clients use the
+server's reachable IP and port 8787. Nginx/Caddy/TLS should still be placed in
+front for encrypted access; direct port 8787 is plain HTTP. The token files
+must be owner-only (`0600`);
 the service keeps their values stable across restarts.
 
 If token files are omitted in single-campaign mode, the process generates
