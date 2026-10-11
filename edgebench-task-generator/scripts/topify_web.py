@@ -443,7 +443,7 @@ def serve(
         "listen_url": f"http://{host}:{port}",
         "campaigns": [str(context.root) for context in state.contexts.values()],
         "supervisors": state.supervisors(),
-        "scan_roots": scan_roots or [],
+        "scan_roots": [str(item) for item in (scan_roots or [])],
         "warning": "Use any reachable server IP with this port; keep tokens private and protect the network path.",
     }
     if registry_file is None and not scan_roots:
