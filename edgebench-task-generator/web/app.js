@@ -3,15 +3,13 @@
   const token = params.get('token') || localStorage.getItem('edgebench-console-token');
   if (token) localStorage.setItem('edgebench-console-token', token);
   const headers = () => token ? { Authorization: `Bearer ${token}` } : {};
-  let dashboard = null;
-  let selected = null;
-  let supervisors = [];
-  let currentSupervisor = new URLSearchParams(location.search).get('supervisor_id');
-  let stream = null;
-
-  const $ = (id) => document.getElementById(id);
-  const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const fmt = (value) => value ? new Date(value).toLocaleString() : '—';
+  const $ = id => document.getElementById(id);
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  const ago = value => {
+    if (!value) return '—';
+    const seconds = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1000));
+    return seconds < 60 ? `${seconds}s ago` : seconds < 3600 ? `${Math.round(seconds / 60)}m ago` : `${Math.round(seconds / 3600)}h ago`;
+  };
   const api = async (path, options = {}) => {
     const response = await fetch(path, { ...options, headers: { ...headers(), ...(options.headers || {}), 'Content-Type': 'application/json' } });
     const value = await response.json().catch(() => ({ error: response.statusText }));
@@ -19,71 +17,127 @@
     return value;
   };
 
-  function statusClass(status) {
-    return ['active','running','rollout-running','needs-owner-decision','replacement-required','repair-required','fired'].includes(status) ? status : '';
+  let supervisors = [];
+  let currentSupervisor = params.get('supervisor_id');
+  let selected = null;
+  let stream = null;
+  let lastDashboard = null;
+
+  function roleLetter(employee) { return (employee.role || 'A').slice(0, 1).toUpperCase(); }
+  function statusKind(status) {
+    if (['needs-owner-decision', 'repair-required', 'replacement-required'].includes(status)) return 'warn';
+    if (['fired', 'failed'].includes(status)) return 'bad';
+    return 'good';
   }
-  function render(value) {
-    dashboard = value;
-    $('active').textContent = value.capacity?.active ?? '—';
-    $('capacity').textContent = `${value.capacity?.available ?? 0} / ${value.capacity?.max_concurrent ?? 0}`;
+  function progress(employee) {
+    const state = employee.status || '';
+    if (state === 'running' || state === 'rollout-running') return 62;
+    if (state === 'awaiting-approval' || state === 'rollout-pending') return 78;
+    if (state === 'needs-owner-decision' || state === 'repair-required') return 54;
+    if (state === 'complete') return 100;
+    return 31;
+  }
+  function currentAction(employee) {
+    if (employee.report?.summary) return employee.report.summary;
+    if (employee.rollout_gate?.status) return `${employee.rollout_gate.status} · ${employee.rollout_gate.action || ''}`;
+    if (employee.qc?.decision) return `QC-${employee.qc.round || '?'} · ${employee.qc.decision}`;
+    return employee.status || 'Waiting for dispatch';
+  }
+  function renderWorkspaces() {
+    $('supervisor-list').innerHTML = supervisors.map(item => `<button class="workspace-item ${item.supervisor_id === currentSupervisor ? 'active' : ''}" data-supervisor="${esc(item.supervisor_id)}"><span class="workspace-icon">${esc(item.benchmark.slice(0, 1))}</span><div><strong>${esc(item.benchmark)}</strong><small>${esc(item.supervisor_id)}</small></div></button>`).join('');
+    document.querySelectorAll('.workspace-item').forEach(button => button.addEventListener('click', () => switchSupervisor(button.dataset.supervisor)));
+  }
+  function renderDashboard(value) {
+    lastDashboard = value;
+    const employees = value.employees || [];
+    const capacity = value.capacity || {};
+    $('active').textContent = capacity.active ?? employees.filter(x => !['fired', 'complete'].includes(x.status)).length;
+    $('capacity').textContent = `${capacity.available ?? '—'} / ${capacity.max_concurrent ?? '—'}`;
     $('alert-count').textContent = value.alerts?.length ?? 0;
+    $('alert-note').textContent = value.alerts?.length ? 'owner decision required' : 'no active alerts';
+    $('health').textContent = value.alerts?.some(x => x.status === 'INFRA_FAILURE') ? 'Review' : 'Good';
     $('updated').textContent = new Date().toLocaleTimeString();
-    $('mode').textContent = `${value.employees?.length ?? 0} workers · live stream`;
-    $('alerts').innerHTML = (value.alerts || []).map(alert => `<div class="alert ${String(alert.status).includes('FAIL') || alert.status === 'EARLY_TOO_EASY' ? 'danger' : ''}"><strong>${esc(alert.kind)}</strong> · ${esc(alert.employee_id)} · ${esc(alert.status)} ${alert.action ? `· ${esc(alert.action)}` : ''}</div>`).join('');
-    $('employees').innerHTML = (value.employees || []).map(employee => {
-      const report = employee.report || {};
-      const gate = employee.rollout_gate || {};
-      return `<tr>
-        <td><strong>${esc(employee.employee_id)}</strong><small>${esc(employee.parent_id || 'supervisor')}</small></td>
-        <td>${esc(employee.role)}<small>${esc(employee.transport)}</small></td>
-        <td><strong>${esc(employee.task_id || 'unassigned')}</strong><small>${esc(employee.seed_id || '')}</small></td>
-        <td><span class="status ${statusClass(employee.status)}">${esc(employee.status)}</span></td>
-        <td><strong>${esc(report.status || '—')}</strong><small>${esc(report.summary || fmt(report.recorded_at))}</small></td>
-        <td><strong>${esc(gate.status || '—')}</strong><small>${esc(gate.action || '')}</small></td>
-        <td><button class="button secondary view-worker" data-id="${esc(employee.employee_id)}">View</button></td>
-      </tr>`;
-    }).join('') || '<tr><td colspan="7" class="empty">No employees.</td></tr>';
-    document.querySelectorAll('.view-worker').forEach(button => button.addEventListener('click', () => showEmployee(button.dataset.id)));
+    $('workspace-title').textContent = value.benchmark || currentSupervisor || 'Workspace';
+    $('workspace-heading').textContent = `${value.benchmark || 'Your'} agents at work.`;
+    $('workspace-subtitle').textContent = `${employees.length} employees · live task state · profile-bound evidence`;
+    $('side-status').textContent = `${employees.length} visible employees`;
+    $('agent-grid').innerHTML = employees.length ? employees.map(renderAgentCard).join('') : '<div class="empty">No employees have been dispatched in this workspace.</div>';
+    document.querySelectorAll('.inspect-agent').forEach(button => button.addEventListener('click', () => showInspector(button.dataset.id)));
+    renderAlerts(value.alerts || []);
+  }
+  function renderAgentCard(employee) {
+    const kind = statusKind(employee.status);
+    const report = employee.report || {};
+    return `<article class="agent-card" style="--card-tint:${kind === 'bad' ? '#fbe7e5' : kind === 'warn' ? '#fff0d9' : '#e3f3e9'}">
+      <div class="card-top"><div class="agent-identity"><span class="agent-avatar">${roleLetter(employee)}</span><div><strong>${esc(employee.employee_id)}</strong><small>${esc(employee.role)} · ${esc(employee.transport || 'native')}</small></div></div><span class="card-status ${kind}"><i></i>${esc(employee.status || 'unknown')}</span></div>
+      <div class="card-body"><div class="card-action">Now <b>${esc(currentAction(employee))}</b></div><div class="card-progress"><span style="width:${progress(employee)}%"></span></div></div>
+      <div class="card-footer"><span>${esc(employee.task_id || employee.seed_id || 'No task assigned')}</span><button class="inspect-agent" data-id="${esc(employee.employee_id)}">Open inspector →</button></div>
+    </article>`;
+  }
+  function renderAlerts(alerts) {
+    $('alerts').innerHTML = alerts.length ? alerts.slice(0, 5).map(item => `<div class="attention-item"><strong>${esc(item.employee_id)} · ${esc(item.status)}</strong><small>${esc(item.action || 'Owner decision required')}</small></div>`).join('') : '<div class="empty">Everything is moving normally.</div>';
+  }
+  function renderActivity(events) {
+    $('activity').innerHTML = events.length ? events.slice(-7).reverse().map(event => `<div class="activity-item"><i class="activity-dot"></i><div><strong>${esc(event.event || 'event')}</strong><small>${esc(event.employee_id || event.supervisor_id || 'system')} · ${esc(event.status || event.reason || '')}</small></div><span class="activity-time">${ago(event.recorded_at)}</span></div>`).join('') : '<div class="empty">No recent activity.</div>';
   }
   async function refresh() {
-    try { render(await api(`/api/dashboard?supervisor_id=${encodeURIComponent(currentSupervisor || '')}`)); $('connection').textContent = 'live'; $('connection').className = 'pill good'; }
-    catch (error) { $('connection').textContent = error.message; $('connection').className = 'pill bad'; }
-  }
-  async function showEmployee(id) {
     try {
-      const value = await api(`/api/dashboard?supervisor_id=${encodeURIComponent(currentSupervisor)}&employee_id=${encodeURIComponent(id)}`);
-      selected = value.employees?.[0];
-      if (!selected) return;
-      $('detail').classList.remove('hidden'); $('detail-title').textContent = id;
-      $('detail-state').textContent = JSON.stringify({ status: selected.status, role: selected.role, parent_id: selected.parent_id, task_id: selected.task_id, seed_id: selected.seed_id, last_dispatch_id: selected.last_dispatch_id }, null, 2);
-      $('detail-evidence').textContent = JSON.stringify({ report: selected.report, qc: selected.qc, rollout_gate: selected.rollout_gate }, null, 2);
-    } catch (error) { alert(error.message); }
+      if (!currentSupervisor) return;
+      const [dashboard, events] = await Promise.all([
+        api(`/api/dashboard?supervisor_id=${encodeURIComponent(currentSupervisor)}`),
+        api(`/api/events?supervisor_id=${encodeURIComponent(currentSupervisor)}`),
+      ]);
+      renderDashboard(dashboard); renderActivity(events.events || []);
+      $('connection').innerHTML = '<i></i>Live'; $('connection').className = 'connection';
+    } catch (error) { $('connection').textContent = error.message; $('connection').className = 'connection error'; }
   }
   async function loadSupervisors() {
     const value = await api('/api/supervisors');
     supervisors = value.supervisors || [];
-    const select = $('supervisor-select');
-    select.innerHTML = supervisors.map(item => `<option value="${esc(item.supervisor_id)}">${esc(item.benchmark)} · ${esc(item.supervisor_id)}</option>`).join('');
     if (!currentSupervisor || !supervisors.some(item => item.supervisor_id === currentSupervisor)) currentSupervisor = supervisors[0]?.supervisor_id;
-    if (currentSupervisor) select.value = currentSupervisor;
-    $('mode').textContent = supervisors.map(item => item.benchmark).join(' · ');
+    renderWorkspaces();
+  }
+  async function showInspector(id) {
+    try {
+      const value = await api(`/api/dashboard?supervisor_id=${encodeURIComponent(currentSupervisor)}&employee_id=${encodeURIComponent(id)}`);
+      selected = value.employees?.[0]; if (!selected) return;
+      $('inspector').classList.remove('hidden'); $('inspector').setAttribute('aria-hidden', 'false');
+      $('detail-title').textContent = selected.employee_id; $('detail-role').textContent = `${selected.role} · ${selected.transport || 'native'} · ${selected.task_id || selected.seed_id || 'unassigned'}`;
+      $('detail-avatar').textContent = roleLetter(selected); $('detail-status').textContent = selected.status || 'unknown';
+      $('detail-state').innerHTML = `<h3>Current state</h3><p><b>${esc(currentAction(selected))}</b></p><p class="muted-line">Parent: ${esc(selected.parent_id || 'supervisor')}<br>Job root: ${esc(selected.job_root || '—')}</p>`;
+      $('detail-evidence').innerHTML = `<h3>Latest evidence</h3><p>QC: ${esc(selected.qc?.decision || '—')}<br>Rollout: ${esc(selected.rollout_gate?.status || '—')}<br>Report: ${esc(selected.report?.status || '—')}</p>`;
+      $('detail-json').textContent = JSON.stringify(selected, null, 2); $('detail-log').textContent = selected.report?.summary || 'No worker summary has been reported yet.';
+      document.querySelectorAll('.inspector-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === 'overview'));
+      document.querySelectorAll('.inspector-body').forEach(body => body.classList.toggle('hidden', body.id !== 'detail-overview'));
+    } catch (error) { window.alert(error.message); }
+  }
+  function switchSupervisor(id) { currentSupervisor = id; history.replaceState(null, '', `?supervisor_id=${encodeURIComponent(id)}`); renderWorkspaces(); $('inspector').classList.add('hidden'); if (stream) stream.close(); refresh(); connect(); }
+  function connect() {
+    if (!token || !currentSupervisor) return;
+    stream = new EventSource(`/api/stream?token=${encodeURIComponent(token)}&supervisor_id=${encodeURIComponent(currentSupervisor)}`);
+    stream.addEventListener('dashboard', event => { try { renderDashboard(JSON.parse(event.data)); $('connection').innerHTML = '<i></i>Live'; $('connection').className = 'connection'; } catch (_) {} });
+    stream.onerror = () => { $('connection').textContent = 'Reconnecting'; $('connection').className = 'connection error'; };
+  }
+  async function sendCommand(text) {
+    const result = await api('/api/command', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, text }) });
+    $('command-result').textContent = `Queued for ${result.supervisor_id}`; return result;
   }
   $('refresh').addEventListener('click', refresh);
-  $('supervisor-select').addEventListener('change', async (event) => { currentSupervisor = event.target.value; history.replaceState(null, '', `?supervisor_id=${encodeURIComponent(currentSupervisor)}`); $('detail').classList.add('hidden'); if (stream) stream.close(); await refresh(); connect(); });
-  $('close-detail').addEventListener('click', () => $('detail').classList.add('hidden'));
-  $('command-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const input = $('command-input'); if (!input.value.trim()) return;
-    try { const result = await api('/api/command', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, text: input.value }) }); $('command-result').textContent = `Queued for ${result.supervisor_id}: ${result.command_sha256}`; input.value = ''; }
-    catch (error) { $('command-result').textContent = error.message; }
-  });
-  $('dispatch-worker').addEventListener('click', async () => { if (!selected) return; try { await api('/api/dispatch', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, employee_id: selected.employee_id }) }); await showEmployee(selected.employee_id); await refresh(); } catch (error) { alert(error.message); } });
-  $('fire-worker').addEventListener('click', async () => { if (!selected || !confirm(`Fire ${selected.employee_id} and its child tree?`)) return; const reason = prompt('Reason'); if (!reason) return; try { await api('/api/fire', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, employee_id: selected.employee_id, reason }) }); await refresh(); await showEmployee(selected.employee_id); } catch (error) { alert(error.message); } });
-  function connect() {
-    if (!token) { $('connection').textContent = 'missing token'; $('connection').className = 'pill bad'; return; }
-    stream = new EventSource(`/api/stream?token=${encodeURIComponent(token)}&supervisor_id=${encodeURIComponent(currentSupervisor || '')}`);
-    stream.addEventListener('dashboard', event => { try { render(JSON.parse(event.data)); $('connection').textContent = 'live'; $('connection').className = 'pill good'; } catch (_) {} });
-    stream.onerror = () => { $('connection').textContent = 'reconnecting'; $('connection').className = 'pill warn'; };
-  }
-  loadSupervisors().then(() => { refresh(); connect(); }).catch(error => { $('connection').textContent = error.message; $('connection').className = 'pill bad'; });
+  $('command-open').addEventListener('click', () => $('command-modal').classList.remove('hidden'));
+  $('command-close').addEventListener('click', () => $('command-modal').classList.add('hidden'));
+  $('close-detail').addEventListener('click', () => { $('inspector').classList.add('hidden'); $('inspector').setAttribute('aria-hidden', 'true'); });
+  document.querySelector('.inspector-backdrop').addEventListener('click', () => $('inspector').classList.add('hidden'));
+  $('command-form').addEventListener('submit', async event => { event.preventDefault(); const text = $('command-input').value.trim(); if (!text) return; try { await sendCommand(text); $('command-input').value = ''; } catch (error) { $('command-result').textContent = error.message; } });
+  $('dispatch-worker').addEventListener('click', async () => { if (!selected) return; try { await api('/api/dispatch', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, employee_id: selected.employee_id }) }); await refresh(); await showInspector(selected.employee_id); } catch (error) { window.alert(error.message); } });
+  $('fire-worker').addEventListener('click', async () => { if (!selected || !window.confirm(`Fire ${selected.employee_id} and its child tree?`)) return; const reason = window.prompt('Reason'); if (!reason) return; try { await api('/api/fire', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, employee_id: selected.employee_id, reason }) }); await refresh(); await showInspector(selected.employee_id); } catch (error) { window.alert(error.message); } });
+  document.querySelectorAll('.inspector-tab').forEach(tab => tab.addEventListener('click', () => {
+    document.querySelectorAll('.inspector-tab').forEach(item => item.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelectorAll('.inspector-body').forEach(body => {
+      const visible = body.id === `detail-${tab.dataset.tab}` || (tab.dataset.tab === 'evidence' && body.id === 'detail-evidence-tab');
+      body.classList.toggle('hidden', !visible);
+    });
+  }));
+  $('theme-toggle').addEventListener('click', () => document.body.classList.toggle('dark-mode'));
+  loadSupervisors().then(() => { refresh(); connect(); }).catch(error => { $('connection').textContent = error.message; $('connection').className = 'connection error'; });
 })();

@@ -3,62 +3,73 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>EdgeBench Supervisor Console</title>
+  <title>EdgeBench · Agent Operations</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header class="topbar">
-    <div>
-      <div class="eyebrow">EDGEbench / supervisor</div>
-      <h1>Supervisor Console</h1>
-    </div>
-    <div class="top-actions">
-      <select id="supervisor-select" class="select" aria-label="Supervisor / Benchmark"></select>
-      <span id="connection" class="pill muted">connecting</span>
-      <button id="refresh" class="button secondary">Refresh</button>
-    </div>
-  </header>
-
-  <main class="shell">
-    <section class="summary-grid">
-      <article class="summary-card"><span>Active</span><strong id="active">—</strong></article>
-      <article class="summary-card"><span>Capacity</span><strong id="capacity">—</strong></article>
-      <article class="summary-card"><span>Alerts</span><strong id="alert-count">—</strong></article>
-      <article class="summary-card"><span>Updated</span><strong id="updated">—</strong></article>
-    </section>
-
-    <section class="panel command-panel">
-      <div class="panel-heading"><div><span class="eyebrow">owner control</span><h2>Ask the supervisor</h2></div></div>
-      <form id="command-form" class="command-form">
-        <input id="command-input" autocomplete="off" placeholder="例如：汇报所有下属，或暂停 producer-003 的下一次派发">
-        <button class="button primary" type="submit">Send</button>
-      </form>
-      <div id="command-result" class="hint">Commands are queued for the supervisor and retained in the audit ledger.</div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-heading"><div><span class="eyebrow">live workforce</span><h2>Employees</h2></div><span id="mode" class="hint"></span></div>
-      <div id="alerts" class="alerts"></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Employee</th><th>Role</th><th>Task / Seed</th><th>Status</th><th>Last report</th><th>Rollout</th><th></th></tr></thead>
-          <tbody id="employees"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
-        </table>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">E</div>
+        <div><strong>EdgeBench</strong><span>Agent Operations</span></div>
       </div>
-    </section>
+      <div class="side-label">WORKSPACES</div>
+      <nav id="supervisor-list" class="workspace-list"></nav>
+      <div class="sidebar-bottom">
+        <div class="system-card"><span class="live-dot"></span><div><strong>Supervisor network</strong><small id="side-status">Connecting…</small></div></div>
+        <button id="theme-toggle" class="side-button">◐ <span>Appearance</span></button>
+      </div>
+    </aside>
 
-    <section id="detail" class="panel detail hidden">
-      <div class="panel-heading"><div><span class="eyebrow">selected worker</span><h2 id="detail-title">—</h2></div><button id="close-detail" class="button secondary">Close</button></div>
-      <div class="detail-grid">
-        <div><h3>State</h3><pre id="detail-state"></pre></div>
-        <div><h3>Latest evidence</h3><pre id="detail-evidence"></pre></div>
+    <main class="main-stage">
+      <header class="topbar">
+        <div class="crumb"><span>Operations</span><b>/</b><strong id="workspace-title">Loading workspace</strong></div>
+        <div class="top-actions">
+          <button id="command-open" class="command-shortcut"><span>⌘</span> Ask supervisor <kbd>⌘ K</kbd></button>
+          <span id="connection" class="connection"><i></i>Connecting</span>
+          <button id="refresh" class="icon-button" aria-label="Refresh">↻</button>
+          <div class="owner-avatar">O</div>
+        </div>
+      </header>
+
+      <div class="content">
+        <section class="welcome-row">
+          <div><p class="overline">LIVE PRODUCTION FLOOR</p><h1 id="workspace-heading">Your agents at work.</h1><p id="workspace-subtitle" class="subtitle">Monitor every task, decision and rollout from one place.</p></div>
+          <div class="date-chip"><span class="pulse-ring"></span><span id="updated">—</span></div>
+        </section>
+
+        <section class="metric-row">
+          <div class="metric"><span>Active agents</span><strong id="active">—</strong><small id="active-note">across this workspace</small></div>
+          <div class="metric"><span>Available capacity</span><strong id="capacity">—</strong><small>ready to dispatch</small></div>
+          <div class="metric"><span>Needs attention</span><strong id="alert-count">—</strong><small id="alert-note">no active alerts</small></div>
+          <div class="metric accent-metric"><span>System health</span><strong id="health">Good</strong><small>ledger and stream online</small></div>
+        </section>
+
+        <section class="section-head"><div><p class="overline">WORKFORCE</p><h2>What your agents are doing</h2></div><div class="view-actions"><button class="view-switch active">Cards</button><button class="view-switch">Timeline</button><button id="filter-button" class="filter-button">Filter <span>☷</span></button></div></section>
+        <section id="agent-grid" class="agent-grid"></section>
+
+        <section class="lower-grid">
+          <div class="activity-panel panel-surface"><div class="panel-title"><div><p class="overline">ACTIVITY</p><h2>Live activity</h2></div><button id="activity-all" class="text-button">View all</button></div><div id="activity" class="activity-list"></div></div>
+          <div class="attention-panel panel-surface"><div class="panel-title"><div><p class="overline">ATTENTION</p><h2>Needs your decision</h2></div></div><div id="alerts" class="attention-list"></div></div>
+        </section>
       </div>
-      <div class="detail-actions">
-        <button id="dispatch-worker" class="button primary">Dispatch / continue</button>
-        <button id="fire-worker" class="button danger">Fire tree</button>
-      </div>
-    </section>
-  </main>
+    </main>
+  </div>
+
+  <div id="inspector" class="inspector hidden" aria-hidden="true">
+    <div class="inspector-backdrop"></div>
+    <aside class="inspector-panel">
+      <div class="inspector-top"><span class="overline">AGENT INSPECTOR</span><button id="close-detail" class="close-button">×</button></div>
+      <div class="inspector-heading"><div id="detail-avatar" class="agent-avatar large">P</div><div><h2 id="detail-title">—</h2><p id="detail-role">—</p></div><span id="detail-status" class="status-chip">—</span></div>
+      <div class="inspector-tabs"><button class="inspector-tab active" data-tab="overview">Overview</button><button class="inspector-tab" data-tab="activity">Activity</button><button class="inspector-tab" data-tab="evidence">Evidence</button></div>
+      <div id="detail-overview" class="inspector-body"><div id="detail-state" class="detail-block"></div><div id="detail-evidence" class="detail-block"></div></div>
+      <div id="detail-activity" class="inspector-body hidden"><pre id="detail-log" class="log-view"></pre></div>
+      <div id="detail-evidence-tab" class="inspector-body hidden"><pre id="detail-json" class="json-view"></pre></div>
+      <div class="inspector-actions"><button id="dispatch-worker" class="action-button primary">Dispatch / continue</button><button id="fire-worker" class="action-button danger">Fire agent tree</button></div>
+    </aside>
+  </div>
+
+  <div id="command-modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><div><p class="overline">OWNER CONTROL</p><h2>Ask the supervisor</h2></div><button id="command-close" class="close-button">×</button></div><p class="modal-copy">Your instruction will be written to the audit ledger and delivered to the selected supervisor.</p><form id="command-form"><textarea id="command-input" placeholder="例如：为 EdgeBench 派发 10 个 producer，优先 systems/software"></textarea><div class="modal-actions"><span id="command-result" class="form-hint">Owner commands are auditable.</span><button class="action-button primary" type="submit">Send instruction</button></div></form></div></div>
   <script src="/app.js"></script>
 </body>
 </html>
