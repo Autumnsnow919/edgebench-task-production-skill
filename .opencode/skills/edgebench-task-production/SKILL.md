@@ -87,6 +87,11 @@ selector may aggregate summaries for the owner, but a supervisor token can
 only address its own Benchmark. Every employee and child Task still receives
 an exclusive job root; never use a shared worktree as a shortcut.
 
+For production discovery, scan only owner-approved roots. A campaign enters
+the Web board only when `supervision/supervisor-stamp.json` validates against
+its campaign and supervisor manifest. Do not infer a supervisor from an
+ordinary directory name or an unverified agent process.
+
 When the owner asks for a Web control panel, read
 `edgebench-task-generator/references/supervisor-web.md` and start the
 authenticated `supervisor-web` server through the shell. Use the owner-approved

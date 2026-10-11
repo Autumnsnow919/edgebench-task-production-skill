@@ -12,23 +12,22 @@ indexes.
 
 ## Start
 
-Initialize each campaign and supervisor first, then create a registry from
-`examples/supervisor-registry.json`. Start the console with the registry. The chat
-supervisor may execute this command for the owner:
+Initialize each campaign and supervisor first. Each `supervisor-init` creates
+`supervision/supervisor-stamp.json`. The production console can discover all
+stamped campaigns below a scan root; no hand-maintained registry is required:
 
 ```bash
 python3 edgebench-task-generator/scripts/topify_pipeline.py \
   supervisor-web \
-  --registry-file /etc/edgebench/supervisors.json \
-  --host 0.0.0.0 --port 8787 \
+  --scan-root /var/lib/edgebench/campaigns \
+  --host 127.0.0.1 --port 8787 \
   --owner-token-file /etc/edgebench/owner.token
 ```
 
-`0.0.0.0` accepts connections from every network interface, so any reachable
-server IP can be used in a browser. Use it only on a trusted LAN,
-Tailscale/WireGuard network, or behind a TLS reverse proxy. Do not expose the
-plain HTTP port directly to the public internet. The token files must be
-owner-only (`0600`); the service keeps their values stable across restarts.
+The recommended production mode binds to localhost and places Nginx/Caddy/TLS
+in front of it. If a trusted internal reverse proxy is on another host, bind
+to `0.0.0.0` explicitly instead. The token files must be owner-only (`0600`);
+the service keeps their values stable across restarts.
 
 If token files are omitted in single-campaign mode, the process generates
 separate owner and supervisor tokens and prints them once. Multi-supervisor
@@ -49,8 +48,7 @@ files, then enable it:
 ```bash
 install -d -m 0750 /etc/edgebench
 install -m 0600 /dev/null /etc/edgebench/owner.token
-install -m 0600 /dev/null /etc/edgebench/supervisor.token
-chmod 600 /etc/edgebench/owner.token /etc/edgebench/supervisor.token
+chmod 600 /etc/edgebench/owner.token
 # Put long random values in the two files, then:
 sudo systemctl daemon-reload
 sudo systemctl enable --now edgebench-supervisor-web.service

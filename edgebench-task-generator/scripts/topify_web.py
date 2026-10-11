@@ -74,19 +74,19 @@ class ConsoleState:
         owner_token_file: str | Path | None = None,
         supervisor_token_file: str | Path | None = None,
         registry_file: str | Path | None = None,
+        scan_roots: list[str | Path] | None = None,
     ):
         self.tokens = {}
         self.contexts = {}
-        if registry_file is not None:
-            registry = topify_registry.load(registry_file)
+        if registry_file is not None or scan_roots:
+            registry = topify_registry.load(registry_file) if registry_file is not None else topify_registry.discover(scan_roots or [])
             owner_token = owner_token or _read_token_file(registry.get("owner_token_file"), "registry owner_token_file")
             for item in registry["supervisors"]:
                 token = _read_token_file(item.get("supervisor_token_file"), f"{item['supervisor_id']} supervisor token")
-                if token is None:
-                    token = _token()
                 context = SupervisorContext(item["supervisor_id"], item["benchmark"], item["campaign"])
                 self.contexts[context.supervisor_id] = context
-                self.tokens[_token_hash(token)] = ("supervisor", context.supervisor_id)
+                if token is not None:
+                    self.tokens[_token_hash(token)] = ("supervisor", context.supervisor_id)
             self.registry_file = str(registry["registry_file"])
             self.dedup_root = registry["dedup_root"]
         else:
@@ -420,13 +420,14 @@ def serve(
     owner_token_file: str | Path | None = None,
     supervisor_token_file: str | Path | None = None,
     registry_file: str | Path | None = None,
+    scan_roots: list[str | Path] | None = None,
 ) -> tuple[dict, int]:
     if type(port) is not int or not 1 <= port <= 65535:
         raise common.PipelineError("web port must be between 1 and 65535")
     owner_token = owner_token or _read_token_file(owner_token_file, "owner_token_file")
     supervisor_token = supervisor_token or _read_token_file(supervisor_token_file, "supervisor_token_file")
     state = ConsoleState(campaign, owner_token, supervisor_token,
-                         owner_token_file, supervisor_token_file, registry_file)
+                         owner_token_file, supervisor_token_file, registry_file, scan_roots)
     server = ConsoleServer((host, port), state)
     report = {
         "status": "running",
@@ -434,6 +435,7 @@ def serve(
         "listen_url": f"http://{host}:{port}",
         "campaigns": [str(context.root) for context in state.contexts.values()],
         "supervisors": state.supervisors(),
+        "scan_roots": scan_roots or [],
         "warning": "Use any reachable server IP with this port; keep tokens private and protect the network path.",
     }
     if registry_file is None:

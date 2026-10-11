@@ -213,12 +213,19 @@ def initialize(
     mode: str = "dual",
     max_concurrent: int | None = None,
     dedup_root: str | Path | None = None,
+    supervisor_id: str | None = None,
+    benchmark: str | None = None,
 ) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     supervision = _supervision_root(root)
     if mode not in {"dual", "opencode-task", "orca-cli"}:
         raise common.PipelineError("supervisor mode must be dual, opencode-task or orca-cli")
     config = _supervision_config(campaign)
+    supervisor_id = supervisor_id or campaign["config"].get("campaign_id", "supervisor")
+    supervisor_id = _id(supervisor_id, "supervisor_id")
+    benchmark = benchmark or "Benchmark"
+    if not _text(benchmark):
+        raise common.PipelineError("benchmark must be nonempty")
     if max_concurrent is not None:
         if type(max_concurrent) is not int or max_concurrent < 1:
             raise common.PipelineError("max_concurrent must be a positive integer")
@@ -236,6 +243,8 @@ def initialize(
         "max_child_tasks": config["max_child_tasks"],
         "dedup_mode": config["dedup_mode"],
         "dedup_root": str(dedup_path),
+        "supervisor_id": supervisor_id,
+        "benchmark": benchmark,
         "status": "ready",
         "initialized_at": common.utc_now(),
     }
@@ -244,10 +253,39 @@ def initialize(
         existing = common.load_json(path)
         if existing.get("campaign_config_sha256") != manifest["campaign_config_sha256"]:
             raise common.PipelineError("supervision manifest already exists for another campaign config")
-        return {"status": "already_initialized", "manifest": str(path), **existing}, 0
+        stamp_path = supervision / "supervisor-stamp.json"
+        if not stamp_path.exists() and not stamp_path.is_symlink():
+            stamp = {
+                "schema_version": 1,
+                "watermark_type": "edgebench-supervisor",
+                "supervisor_id": supervisor_id,
+                "benchmark": benchmark,
+                "campaign_root": str(root),
+                "campaign_config_sha256": campaign["config_sha256"],
+                "supervision_manifest_sha256": common.sha256_file(path),
+                "dedup_root": existing.get("dedup_root", str(dedup_path)),
+                "status": "active",
+                "created_at": common.utc_now(),
+            }
+            common.write_new_json(stamp_path, stamp)
+        return {"status": "already_initialized", "manifest": str(path), "stamp": str(stamp_path), **existing}, 0
     common.write_new_json(path, manifest)
+    stamp_path = supervision / "supervisor-stamp.json"
+    stamp = {
+        "schema_version": 1,
+        "watermark_type": "edgebench-supervisor",
+        "supervisor_id": supervisor_id,
+        "benchmark": benchmark,
+        "campaign_root": str(root),
+        "campaign_config_sha256": campaign["config_sha256"],
+        "supervision_manifest_sha256": common.sha256_file(path),
+        "dedup_root": str(dedup_path),
+        "status": "active",
+        "created_at": common.utc_now(),
+    }
+    common.write_new_json(stamp_path, stamp)
     _append(root, "supervisor_initialized", mode=mode, max_concurrent=config["max_concurrent"])
-    return {"status": "ready", "manifest": str(path), **manifest}, 0
+    return {"status": "ready", "manifest": str(path), "stamp": str(stamp_path), **manifest}, 0
 
 
 def _employees(root: Path) -> list[dict]:

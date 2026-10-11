@@ -60,6 +60,10 @@ cross-supervisor index: it stores fingerprints and frozen task hashes, not
 worker files. A producer may read and write only its own exclusive job root;
 QC gets a separate root and read-only task evidence.
 
+The production Web console may discover these supervisors from approved scan
+roots. Only a validated `supervision/supervisor-stamp.json` is a recognized
+watermark; arbitrary folders and process names are never auto-enrolled.
+
 If the owner requests a browser dashboard, read
 `references/supervisor-web.md` and start `supervisor-web` with authentication.
 The Web console is another view/control plane over the ledger, not a second

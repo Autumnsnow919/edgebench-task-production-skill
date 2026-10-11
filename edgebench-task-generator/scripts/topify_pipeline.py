@@ -246,6 +246,8 @@ def parser() -> argparse.ArgumentParser:
     supervisor_init.add_argument("--mode", choices=("dual", "opencode-task", "orca-cli"), default="dual")
     supervisor_init.add_argument("--max-concurrent", type=int)
     supervisor_init.add_argument("--dedup-root", type=Path)
+    supervisor_init.add_argument("--supervisor-id")
+    supervisor_init.add_argument("--benchmark")
     employee_hire = commands.add_parser("employee-hire", help="register one one-task production employee")
     employee_hire.add_argument("workspace", type=Path)
     employee_hire.add_argument("--employee-id", required=True)
@@ -271,6 +273,7 @@ def parser() -> argparse.ArgumentParser:
     supervisor_web.add_argument("--owner-token-file", type=Path)
     supervisor_web.add_argument("--supervisor-token-file", type=Path)
     supervisor_web.add_argument("--registry-file", type=Path)
+    supervisor_web.add_argument("--scan-root", action="append", type=Path)
     employee_fire = commands.add_parser("employee-fire", help="record a controlled employee termination")
     employee_fire.add_argument("workspace", type=Path)
     employee_fire.add_argument("--employee-id", required=True)
@@ -647,7 +650,8 @@ def main(argv: list[str] | None = None) -> int:
             report, code = topify_seed.campaign_status(args.workspace), 0
         elif args.command == "supervisor-init":
             report, code = topify_supervisor.initialize(
-                args.workspace, args.mode, args.max_concurrent, args.dedup_root
+                args.workspace, args.mode, args.max_concurrent, args.dedup_root,
+                args.supervisor_id, args.benchmark,
             )
         elif args.command == "employee-hire":
             report, code = topify_supervisor.hire(
@@ -663,7 +667,7 @@ def main(argv: list[str] | None = None) -> int:
             report, code = topify_web.serve(
                 args.workspace, args.host, args.port, args.owner_token,
                 args.supervisor_token, args.owner_token_file,
-                args.supervisor_token_file, args.registry_file,
+                args.supervisor_token_file, args.registry_file, args.scan_root,
             )
         elif args.command == "employee-fire":
             report, code = topify_supervisor.fire(

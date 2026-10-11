@@ -11,6 +11,7 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import topify_seed  # noqa: E402
+import topify_registry  # noqa: E402
 import topify_supervisor  # noqa: E402
 import topify_web  # noqa: E402
 
@@ -136,9 +137,11 @@ class SupervisorProtocolTests(unittest.TestCase):
         second = self.root / "second-campaign"
         config = Path(__file__).resolve().parents[1] / "examples/campaign-config.json"
         topify_seed.initialize_campaign(first, config)
-        topify_supervisor.initialize(first, mode="dual", dedup_root=global_dedup)
+        topify_supervisor.initialize(first, mode="dual", dedup_root=global_dedup,
+                                     supervisor_id="first", benchmark="EdgeBench")
         topify_seed.initialize_campaign(second, config)
-        topify_supervisor.initialize(second, mode="dual", dedup_root=global_dedup)
+        topify_supervisor.initialize(second, mode="dual", dedup_root=global_dedup,
+                                     supervisor_id="second", benchmark="OtherBench")
         owner = self.root / "owner.token"
         first_token = self.root / "first.token"
         second_token = self.root / "second.token"
@@ -160,6 +163,8 @@ class SupervisorProtocolTests(unittest.TestCase):
         self.assertEqual(state.auth("owner"), ("owner", None))
         self.assertEqual(state.auth("second"), ("supervisor", "second"))
         self.assertEqual(state.dashboard("first")["benchmark"], "EdgeBench")
+        discovered = topify_registry.discover([self.root / "first-campaign", self.root / "second-campaign"])
+        self.assertEqual({item["supervisor_id"] for item in discovered["supervisors"]}, {"first", "second"})
         topify_supervisor.hire(
             first, "first-producer", "producer", "opencode-task",
             seed_id="systems-software-engineering/cpython/lead-001",

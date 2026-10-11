@@ -88,3 +88,60 @@ def load(path: str | Path) -> dict:
         "dedup_root": str(dedup_root),
         "supervisors": result,
     }
+
+
+def discover(scan_roots: list[str | Path]) -> dict:
+    """Discover stamped campaigns below explicit production scan roots."""
+    if not scan_roots:
+        raise common.PipelineError("at least one scan root is required")
+    stamps = []
+    seen = set()
+    for raw_root in scan_roots:
+        root = Path(raw_root).absolute()
+        if root.is_symlink() or not root.is_dir():
+            raise common.PipelineError(f"scan root is not a directory: {root}")
+        for stamp_path in sorted(root.rglob("supervision/supervisor-stamp.json")):
+            if stamp_path.is_symlink() or not stamp_path.is_file():
+                continue
+            stamp = common.load_json(stamp_path)
+            if stamp.get("watermark_type") != "edgebench-supervisor" or stamp.get("schema_version") != 1:
+                continue
+            campaign = stamp_path.parent.parent
+            resolved_campaign = campaign.resolve(strict=True)
+            if resolved_campaign in seen:
+                continue
+            seen.add(resolved_campaign)
+            topify_seed.load_campaign(resolved_campaign)
+            manifest_path = resolved_campaign / "supervision/manifest.json"
+            manifest = common.load_json(manifest_path)
+            if stamp.get("campaign_root") != str(resolved_campaign):
+                raise common.PipelineError(f"supervisor stamp campaign_root mismatch: {stamp_path}")
+            if stamp.get("campaign_config_sha256") != manifest.get("campaign_config_sha256"):
+                raise common.PipelineError(f"supervisor stamp config hash mismatch: {stamp_path}")
+            supervisor_id = stamp.get("supervisor_id")
+            benchmark = stamp.get("benchmark")
+            if not isinstance(supervisor_id, str) or ID_RE.fullmatch(supervisor_id) is None:
+                raise common.PipelineError(f"invalid supervisor_id in stamp: {stamp_path}")
+            if not isinstance(benchmark, str) or not benchmark.strip():
+                raise common.PipelineError(f"invalid benchmark in stamp: {stamp_path}")
+            stamps.append({
+                "supervisor_id": supervisor_id,
+                "benchmark": benchmark,
+                "campaign": str(resolved_campaign),
+                "supervisor_token_file": None,
+                "stamp_file": str(stamp_path.resolve()),
+                "dedup_root": manifest.get("dedup_root"),
+            })
+    if not stamps:
+        raise common.PipelineError("no valid supervisor-stamp.json found below scan roots")
+    ids = [item["supervisor_id"] for item in stamps]
+    if len(ids) != len(set(ids)):
+        raise common.PipelineError("discovered supervisor_id values are not unique")
+    dedup_roots = {item["dedup_root"] for item in stamps}
+    return {
+        "schema_version": 1,
+        "discovered": True,
+        "scan_roots": [str(Path(item).absolute()) for item in scan_roots],
+        "dedup_root": next(iter(dedup_roots)) if len(dedup_roots) == 1 else None,
+        "supervisors": stamps,
+    }

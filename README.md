@@ -90,17 +90,25 @@ ledger and SSE updates, with separate owner/supervisor tokens:
 ```bash
 python3 edgebench-task-generator/scripts/topify_pipeline.py \
   supervisor-web \
-  --registry-file /etc/edgebench/supervisors.json \
-  --host 0.0.0.0 --port 8787 \
+  --scan-root /var/lib/edgebench/campaigns \
+  --host 127.0.0.1 --port 8787 \
   --owner-token-file /etc/edgebench/owner.token
 ```
 
-The service can host multiple separated Benchmark supervisors from one registry
-and listens on every interface, so other IPs can connect to any reachable
-server IP on port 8787. Use a trusted network or a TLS reverse proxy;
-do not expose plain HTTP directly to the public internet. Keep token files at
-mode `0600` and run this command under systemd/supervisord for persistence. See
+The service auto-discovers multiple separated Benchmark supervisors from
+`supervisor-stamp.json` files below the scan root. It binds to localhost and
+should be exposed through a TLS reverse proxy. Keep the token file at mode
+`0600` and run this command under systemd/supervisord for persistence. See
 `edgebench-task-generator/references/supervisor-web.md` for controls and API.
+
+Create a stamped supervisor with explicit identity when initializing a real
+campaign:
+
+```bash
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  supervisor-init CAMPAIGN --supervisor-id edgebench \
+  --benchmark EdgeBench --dedup-root /var/lib/edgebench/dedup-global
+```
 
 Use `rehearsal` mode for production-line tests. Rehearsal artifacts are private
 and never count as Seed promotion, formal task delivery, model rollout or
