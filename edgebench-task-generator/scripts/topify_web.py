@@ -96,7 +96,8 @@ class ConsoleState:
             supervisor_token = supervisor_token or _read_token_file(supervisor_token_file, "supervisor_token_file")
             context = SupervisorContext("default", "Benchmark", campaign)
             self.contexts["default"] = context
-            self.tokens[_token_hash(supervisor_token or _token())] = ("supervisor", "default")
+            self.supervisor_token = supervisor_token or _token()
+            self.tokens[_token_hash(self.supervisor_token)] = ("supervisor", "default")
             self.registry_file = None
             self.dedup_root = None
         self.owner_token = owner_token or _token()
@@ -431,12 +432,13 @@ def serve(
         "status": "running",
         "bind": f"{host}:{port}",
         "listen_url": f"http://{host}:{port}",
-        "owner_token": state.owner_token,
-        "supervisor_token": state.supervisor_token,
         "campaigns": [str(context.root) for context in state.contexts.values()],
         "supervisors": state.supervisors(),
         "warning": "Use any reachable server IP with this port; keep tokens private and protect the network path.",
     }
+    if registry_file is None:
+        report["owner_token"] = state.owner_token
+        report["supervisor_token"] = state.supervisor_token
     print(json.dumps(report, ensure_ascii=False, sort_keys=True), flush=True)
     try:
         server.serve_forever()
