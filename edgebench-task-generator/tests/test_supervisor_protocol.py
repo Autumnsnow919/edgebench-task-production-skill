@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import topify_seed  # noqa: E402
 import topify_supervisor  # noqa: E402
+import topify_web  # noqa: E402
 
 
 class SupervisorProtocolTests(unittest.TestCase):
@@ -96,6 +98,21 @@ class SupervisorProtocolTests(unittest.TestCase):
         self.assertEqual(dashboard["capacity"]["active"], 1)
         self.assertEqual(dashboard["employees"][0]["report"]["status"], "heartbeat")
         self.assertIn("measuring", dashboard["employees"][0]["report"]["summary"])
+
+    def test_web_token_files_are_owner_only(self):
+        owner = self.root / "owner.token"
+        supervisor = self.root / "supervisor.token"
+        owner.write_text("owner-secret\n")
+        supervisor.write_text("supervisor-secret\n")
+        os.chmod(owner, 0o600)
+        os.chmod(supervisor, 0o600)
+        self.assertEqual(topify_web._read_token_file(owner, "owner"), "owner-secret")
+        state = topify_web.ConsoleState(
+            self.campaign, topify_web._read_token_file(owner, "owner"),
+            topify_web._read_token_file(supervisor, "supervisor"),
+        )
+        self.assertEqual(state.role("owner-secret"), "owner")
+        self.assertEqual(state.role("supervisor-secret"), "supervisor")
 
 
 if __name__ == "__main__":

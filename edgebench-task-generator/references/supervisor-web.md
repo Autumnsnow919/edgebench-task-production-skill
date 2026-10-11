@@ -12,17 +12,44 @@ supervisor may execute this command for the owner:
 ```bash
 python3 edgebench-task-generator/scripts/topify_pipeline.py \
   supervisor-web CAMPAIGN --host 0.0.0.0 --port 8787 \
-  --advertise-host SERVER_IP
+  --owner-token-file /etc/edgebench/owner.token \
+  --supervisor-token-file /etc/edgebench/supervisor.token
 ```
 
-`0.0.0.0` accepts connections from other IPs. Use it only on a trusted LAN,
+`0.0.0.0` accepts connections from every network interface, so any reachable
+server IP can be used in a browser. Use it only on a trusted LAN,
 Tailscale/WireGuard network, or behind a TLS reverse proxy. Do not expose the
-plain HTTP port directly to the public internet.
+plain HTTP port directly to the public internet. The token files must be
+owner-only (`0600`); the service keeps their values stable across restarts.
 
-The process prints separate owner and supervisor tokens. The owner can queue
+If token files are omitted, the process generates separate owner and supervisor
+tokens and prints them once. For a resident service, use fixed `0600` token
+files so a restart does not invalidate browser sessions. The owner can queue
 instructions to the supervisor and approve QC exceptions; the supervisor can
 dispatch, terminate and replace employees. Keep both tokens private. Tokens are
 not written into campaign/customer packages.
+
+The service is foreground-safe and should be kept resident by systemd,
+supervisord or another process manager with automatic restart.
+
+For systemd, copy and edit
+`references/edgebench-supervisor-web.service`, create the two owner-only token
+files, then enable it:
+
+```bash
+install -d -m 0750 /etc/edgebench
+install -m 0600 /dev/null /etc/edgebench/owner.token
+install -m 0600 /dev/null /etc/edgebench/supervisor.token
+chmod 600 /etc/edgebench/owner.token /etc/edgebench/supervisor.token
+# Put long random values in the two files, then:
+sudo systemctl daemon-reload
+sudo systemctl enable --now edgebench-supervisor-web.service
+sudo systemctl status edgebench-supervisor-web.service
+```
+
+Open `http://SERVER_IP:8787/` from any permitted server/client IP. Allow TCP
+8787 in the host firewall only for the intended network; binding to all
+interfaces does not bypass firewall or network ACLs.
 
 ## Views
 

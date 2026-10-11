@@ -262,11 +262,12 @@ def parser() -> argparse.ArgumentParser:
     supervisor_dashboard.add_argument("--employee-id")
     supervisor_web = commands.add_parser("supervisor-web", help="serve the authenticated supervisor web console")
     supervisor_web.add_argument("workspace", type=Path)
-    supervisor_web.add_argument("--host", default="127.0.0.1")
+    supervisor_web.add_argument("--host", default="0.0.0.0")
     supervisor_web.add_argument("--port", type=int, default=8787)
     supervisor_web.add_argument("--owner-token")
     supervisor_web.add_argument("--supervisor-token")
-    supervisor_web.add_argument("--advertise-host")
+    supervisor_web.add_argument("--owner-token-file", type=Path)
+    supervisor_web.add_argument("--supervisor-token-file", type=Path)
     employee_fire = commands.add_parser("employee-fire", help="record a controlled employee termination")
     employee_fire.add_argument("workspace", type=Path)
     employee_fire.add_argument("--employee-id", required=True)
@@ -649,7 +650,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "supervisor-web":
             report, code = topify_web.serve(
                 args.workspace, args.host, args.port, args.owner_token,
-                args.supervisor_token, args.advertise_host,
+                args.supervisor_token, args.owner_token_file,
+                args.supervisor_token_file,
             )
         elif args.command == "employee-fire":
             report, code = topify_supervisor.fire(

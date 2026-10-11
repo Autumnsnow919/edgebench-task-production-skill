@@ -86,11 +86,14 @@ ledger and SSE updates, with separate owner/supervisor tokens:
 ```bash
 python3 edgebench-task-generator/scripts/topify_pipeline.py \
   supervisor-web CAMPAIGN --host 0.0.0.0 --port 8787 \
-  --advertise-host SERVER_IP
+  --owner-token-file /etc/edgebench/owner.token \
+  --supervisor-token-file /etc/edgebench/supervisor.token
 ```
 
-Other IPs can connect to the host on port 8787. Use a trusted network or a TLS
-reverse proxy; do not expose plain HTTP directly to the public internet. See
+The service listens on every interface, so other IPs can connect to any
+reachable server IP on port 8787. Use a trusted network or a TLS reverse proxy;
+do not expose plain HTTP directly to the public internet. Keep token files at
+mode `0600` and run this command under systemd/supervisord for persistence. See
 `edgebench-task-generator/references/supervisor-web.md` for controls and API.
 
 Use `rehearsal` mode for production-line tests. Rehearsal artifacts are private

@@ -13,6 +13,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import secrets
+import stat
 import time
 from urllib.parse import parse_qs, urlparse
 
@@ -31,6 +32,23 @@ def _token_hash(value: str) -> str:
 
 def _token() -> str:
     return secrets.token_urlsafe(32)
+
+
+def _read_token_file(value: str | Path | None, label: str) -> str | None:
+    if value is None:
+        return None
+    path = Path(value)
+    if path.is_symlink() or not path.is_file():
+        raise common.PipelineError(f"{label} must be an existing regular file")
+    mode = path.stat().st_mode
+    if mode & (stat.S_IRWXG | stat.S_IRWXO):
+        raise common.PipelineError(f"{label} must be owner-only (mode 0600 or stricter)")
+    if path.stat().st_size > 4096:
+        raise common.PipelineError(f"{label} is too large")
+    token = path.read_text(encoding="utf-8").strip()
+    if not token:
+        raise common.PipelineError(f"{label} is empty")
+    return token
 
 
 class ConsoleState:
@@ -287,26 +305,27 @@ class ConsoleServer(ThreadingHTTPServer):
 
 def serve(
     campaign: str | Path,
-    host: str = "127.0.0.1",
+    host: str = "0.0.0.0",
     port: int = 8787,
     owner_token: str | None = None,
     supervisor_token: str | None = None,
-    advertise_host: str | None = None,
+    owner_token_file: str | Path | None = None,
+    supervisor_token_file: str | Path | None = None,
 ) -> tuple[dict, int]:
     if type(port) is not int or not 1 <= port <= 65535:
         raise common.PipelineError("web port must be between 1 and 65535")
+    owner_token = owner_token or _read_token_file(owner_token_file, "owner_token_file")
+    supervisor_token = supervisor_token or _read_token_file(supervisor_token_file, "supervisor_token_file")
     state = ConsoleState(campaign, owner_token, supervisor_token)
     server = ConsoleServer((host, port), state)
-    display_host = advertise_host or ("127.0.0.1" if host in {"127.0.0.1", "::1"} else "<server-ip>")
     report = {
         "status": "running",
         "bind": f"{host}:{port}",
-        "owner_url": f"http://{display_host}:{port}/?token={state.owner_token}",
-        "supervisor_url": f"http://{display_host}:{port}/?token={state.supervisor_token}",
+        "listen_url": f"http://{host}:{port}",
         "owner_token": state.owner_token,
         "supervisor_token": state.supervisor_token,
         "campaign": str(state.root),
-        "warning": "Bind non-loopback only on a trusted network; keep tokens private.",
+        "warning": "Use any reachable server IP with this port; keep tokens private and protect the network path.",
     }
     print(json.dumps(report, ensure_ascii=False, sort_keys=True), flush=True)
     try:
