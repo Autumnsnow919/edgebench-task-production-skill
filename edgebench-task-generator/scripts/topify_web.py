@@ -446,7 +446,7 @@ def serve(
         "scan_roots": scan_roots or [],
         "warning": "Use any reachable server IP with this port; keep tokens private and protect the network path.",
     }
-    if registry_file is None:
+    if registry_file is None and not scan_roots:
         report["owner_token"] = state.owner_token
         report["supervisor_token"] = state.supervisor_token
     print(json.dumps(report, ensure_ascii=False, sort_keys=True), flush=True)
