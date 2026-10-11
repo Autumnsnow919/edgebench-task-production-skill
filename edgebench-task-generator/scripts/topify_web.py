@@ -81,6 +81,10 @@ class ConsoleState:
     ):
         self.tokens = {}
         self.contexts = {}
+        self.scan_roots = list(scan_roots or [])
+        self.adopt_legacy = adopt_legacy
+        self.discovery_dedup_root = dedup_root
+        self.legacy_benchmark = legacy_benchmark
         if registry_file is not None or scan_roots:
             registry = (topify_registry.load(registry_file) if registry_file is not None else
                         topify_registry.discover(scan_roots or [], adopt_legacy, dedup_root, legacy_benchmark))
@@ -112,7 +116,27 @@ class ConsoleState:
             return None
         return self.tokens.get(_token_hash(value))
 
+    def refresh_discovery(self) -> None:
+        if not self.scan_roots:
+            return
+        registry = topify_registry.discover(
+            self.scan_roots, self.adopt_legacy,
+            self.discovery_dedup_root, self.legacy_benchmark,
+        )
+        refreshed = {}
+        for item in registry["supervisors"]:
+            existing = self.contexts.get(item["supervisor_id"])
+            if existing is not None and existing.root == Path(item["campaign"]).resolve():
+                refreshed[item["supervisor_id"]] = existing
+            else:
+                refreshed[item["supervisor_id"]] = SupervisorContext(
+                    item["supervisor_id"], item["benchmark"], item["campaign"]
+                )
+        self.contexts = refreshed
+        self.dedup_root = registry.get("dedup_root")
+
     def context(self, supervisor_id: str | None, auth: tuple[str, str | None], required: bool = True) -> SupervisorContext | None:
+        self.refresh_discovery()
         role, token_scope = auth
         scope = supervisor_id or token_scope
         if role == "supervisor" and scope != token_scope:
@@ -127,6 +151,7 @@ class ConsoleState:
         return value
 
     def supervisors(self) -> list[dict]:
+        self.refresh_discovery()
         return [
             {
                 "supervisor_id": context.supervisor_id,
@@ -137,6 +162,7 @@ class ConsoleState:
         ]
 
     def dashboard(self, supervisor_id: str | None = None, employee_id: str | None = None) -> dict:
+        self.refresh_discovery()
         if supervisor_id is not None:
             return self.contexts[supervisor_id].dashboard(employee_id)
         rows = [context.dashboard() for context in self.contexts.values()]
