@@ -54,6 +54,11 @@ employee table plus only actionable alerts. Use the OpenCode child-session
 result or Orca `worker-show`/`worker-read` only for the named employee; the
 supervisor should not flood the owner with every raw transcript.
 
+If the owner requests a browser dashboard, read
+`references/supervisor-web.md` and start `supervisor-web` with authentication.
+The Web console is another view/control plane over the ledger, not a second
+source of truth.
+
 The owner may invoke the Skill in `rehearsal` mode to test the production line.
 Rehearsal may discover and pin Seeds, run bounded micro-prototypes and verify
 gates, but its files stay outside customer inputs and do not promote a Seed,

@@ -40,6 +40,7 @@ import topify_sforge_acceptance
 import topify_sforge_batch
 import topify_validate
 import topify_supervisor
+import topify_web
 
 
 def initialize(workspace: Path, request_path: Path) -> dict:
@@ -259,6 +260,13 @@ def parser() -> argparse.ArgumentParser:
     supervisor_dashboard = commands.add_parser("supervisor-dashboard", help="show chat-friendly worker progress and alerts")
     supervisor_dashboard.add_argument("workspace", type=Path)
     supervisor_dashboard.add_argument("--employee-id")
+    supervisor_web = commands.add_parser("supervisor-web", help="serve the authenticated supervisor web console")
+    supervisor_web.add_argument("workspace", type=Path)
+    supervisor_web.add_argument("--host", default="127.0.0.1")
+    supervisor_web.add_argument("--port", type=int, default=8787)
+    supervisor_web.add_argument("--owner-token")
+    supervisor_web.add_argument("--supervisor-token")
+    supervisor_web.add_argument("--advertise-host")
     employee_fire = commands.add_parser("employee-fire", help="record a controlled employee termination")
     employee_fire.add_argument("workspace", type=Path)
     employee_fire.add_argument("--employee-id", required=True)
@@ -638,6 +646,11 @@ def main(argv: list[str] | None = None) -> int:
             report, code = topify_supervisor.status(args.workspace)
         elif args.command == "supervisor-dashboard":
             report, code = topify_supervisor.dashboard(args.workspace, args.employee_id)
+        elif args.command == "supervisor-web":
+            report, code = topify_web.serve(
+                args.workspace, args.host, args.port, args.owner_token,
+                args.supervisor_token, args.advertise_host,
+            )
         elif args.command == "employee-fire":
             report, code = topify_supervisor.fire(
                 args.workspace, args.employee_id, args.reason, args.evidence

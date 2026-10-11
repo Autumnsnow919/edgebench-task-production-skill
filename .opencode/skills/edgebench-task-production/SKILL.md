@@ -81,6 +81,14 @@ employee, run `supervisor-dashboard` internally. Present status, last report,
 QC/rollout checkpoint and alerts in chat. Do not expose raw credentials or dump
 all worker logs by default; offer a focused worker read only when needed.
 
+When the owner asks for a Web control panel, read
+`edgebench-task-generator/references/supervisor-web.md` and start the
+authenticated `supervisor-web` server through the shell. Use the owner-approved
+bind address; `0.0.0.0` is allowed for a trusted network, not a public unauthenticated
+service. The supervisor must also read pending owner commands under
+`CAMPAIGN/supervision/commands/` and report their outcome; a queued Web command
+is not yet an executed agent action.
+
 At the start of a new authoring request, collect or locate:
 
 - the user's Benchmark requirements document;

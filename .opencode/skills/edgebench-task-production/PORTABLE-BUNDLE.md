@@ -62,6 +62,9 @@ Orca's supervised workers; the owner does not need to copy the CLI commands.
 Say “汇报所有下属” or “查看 producer-001” to receive the dashboard and a
 focused worker summary.
 
+For a browser control panel on a trusted network, use the bundled
+`supervisor-web` command and read `edgebench-task-generator/references/supervisor-web.md`.
+
 Use `rehearsal` mode for production-line tests. Rehearsal artifacts are private
 and never count as Seed promotion, formal task delivery, model rollout or
 customer acceptance.

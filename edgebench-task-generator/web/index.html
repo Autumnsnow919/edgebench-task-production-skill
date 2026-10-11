@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EdgeBench Supervisor Console</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">EDGEbench / supervisor</div>
+      <h1>Supervisor Console</h1>
+    </div>
+    <div class="top-actions">
+      <span id="connection" class="pill muted">connecting</span>
+      <button id="refresh" class="button secondary">Refresh</button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="summary-grid">
+      <article class="summary-card"><span>Active</span><strong id="active">—</strong></article>
+      <article class="summary-card"><span>Capacity</span><strong id="capacity">—</strong></article>
+      <article class="summary-card"><span>Alerts</span><strong id="alert-count">—</strong></article>
+      <article class="summary-card"><span>Updated</span><strong id="updated">—</strong></article>
+    </section>
+
+    <section class="panel command-panel">
+      <div class="panel-heading"><div><span class="eyebrow">owner control</span><h2>Ask the supervisor</h2></div></div>
+      <form id="command-form" class="command-form">
+        <input id="command-input" autocomplete="off" placeholder="例如：汇报所有下属，或暂停 producer-003 的下一次派发">
+        <button class="button primary" type="submit">Send</button>
+      </form>
+      <div id="command-result" class="hint">Commands are queued for the supervisor and retained in the audit ledger.</div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading"><div><span class="eyebrow">live workforce</span><h2>Employees</h2></div><span id="mode" class="hint"></span></div>
+      <div id="alerts" class="alerts"></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Employee</th><th>Role</th><th>Task / Seed</th><th>Status</th><th>Last report</th><th>Rollout</th><th></th></tr></thead>
+          <tbody id="employees"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="detail" class="panel detail hidden">
+      <div class="panel-heading"><div><span class="eyebrow">selected worker</span><h2 id="detail-title">—</h2></div><button id="close-detail" class="button secondary">Close</button></div>
+      <div class="detail-grid">
+        <div><h3>State</h3><pre id="detail-state"></pre></div>
+        <div><h3>Latest evidence</h3><pre id="detail-evidence"></pre></div>
+      </div>
+      <div class="detail-actions">
+        <button id="dispatch-worker" class="button primary">Dispatch / continue</button>
+        <button id="fire-worker" class="button danger">Fire tree</button>
+      </div>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

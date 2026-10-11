@@ -78,6 +78,21 @@ To inspect workers, say “汇报所有下属” or “查看 producer-001”. T
 returns the dashboard, and opens only the requested worker's result/log summary
 when necessary.
 
+## Web console
+
+The bundle includes a lightweight interactive Web console. It uses the same
+ledger and SSE updates, with separate owner/supervisor tokens:
+
+```bash
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  supervisor-web CAMPAIGN --host 0.0.0.0 --port 8787 \
+  --advertise-host SERVER_IP
+```
+
+Other IPs can connect to the host on port 8787. Use a trusted network or a TLS
+reverse proxy; do not expose plain HTTP directly to the public internet. See
+`edgebench-task-generator/references/supervisor-web.md` for controls and API.
+
 Use `rehearsal` mode for production-line tests. Rehearsal artifacts are private
 and never count as Seed promotion, formal task delivery, model rollout or
 customer acceptance.

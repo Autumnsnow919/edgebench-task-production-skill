@@ -1,0 +1,35 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b1020;
+  --panel: #121a2c;
+  --panel-2: #17223a;
+  --line: #263653;
+  --text: #e8edf7;
+  --muted: #93a2bc;
+  --accent: #77e0c2;
+  --warn: #f6c86e;
+  --danger: #ff8181;
+  --shadow: 0 18px 45px rgba(0,0,0,.22);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: radial-gradient(circle at 10% 0%, #172642, var(--bg) 45%); color: var(--text); font: 14px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; }
+button, input { font: inherit; }
+.topbar { display: flex; justify-content: space-between; align-items: center; padding: 28px 42px; border-bottom: 1px solid var(--line); background: rgba(11,16,32,.82); position: sticky; top: 0; z-index: 2; backdrop-filter: blur(14px); }
+h1, h2, h3, p { margin: 0; } h1 { font-size: 25px; letter-spacing: -.03em; } h2 { font-size: 18px; } h3 { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .16em; text-transform: uppercase; font-weight: 700; }
+.top-actions, .detail-actions { display: flex; gap: 10px; align-items: center; }
+.shell { max-width: 1500px; margin: 0 auto; padding: 30px 42px 60px; }
+.summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+.summary-card, .panel { border: 1px solid var(--line); background: linear-gradient(150deg, rgba(23,34,58,.92), rgba(18,26,44,.92)); box-shadow: var(--shadow); border-radius: 15px; }
+.summary-card { padding: 18px 20px; } .summary-card span { color: var(--muted); } .summary-card strong { display: block; margin-top: 4px; font-size: 25px; }
+.panel { padding: 22px; margin-bottom: 18px; } .panel-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.button { border: 1px solid var(--line); border-radius: 9px; padding: 8px 13px; color: var(--text); cursor: pointer; background: var(--panel-2); } .button:hover { border-color: var(--accent); } .button.primary { background: #1d665b; border-color: #369e89; } .button.danger { background: #542a35; border-color: #a64f5d; } .button.secondary { background: transparent; }
+.pill { border-radius: 20px; padding: 5px 10px; font-size: 12px; } .pill.muted { color: var(--muted); background: var(--panel-2); } .pill.good { color: #9af1ce; background: #163d38; } .pill.warn { color: #ffdb8d; background: #493b1e; } .pill.bad { color: #ffabab; background: #4e2730; }
+.command-form { display: flex; gap: 10px; } input { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 11px 13px; color: var(--text); background: #0d1527; outline: none; } input:focus { border-color: var(--accent); }
+.hint, .empty { color: var(--muted); } .command-panel .hint { margin-top: 10px; }
+.alerts { display: grid; gap: 8px; margin-bottom: 14px; } .alert { border-left: 3px solid var(--warn); background: rgba(91,70,26,.25); padding: 9px 12px; border-radius: 7px; } .alert.danger { border-color: var(--danger); background: rgba(87,34,44,.28); }
+.table-wrap { overflow-x: auto; } table { width: 100%; min-width: 930px; border-collapse: collapse; } th, td { padding: 12px 10px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; } th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; } td strong { display: block; } td small { color: var(--muted); display: block; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status { display: inline-flex; padding: 4px 8px; border-radius: 7px; font-size: 12px; background: var(--panel-2); } .status.active, .status.running, .status.rollout-running { color: #9af1ce; } .status.needs-owner-decision, .status.replacement-required, .status.repair-required { color: #ffdb8d; background: #493b1e; } .status.fired { color: #ffabab; background: #4e2730; }
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } pre { white-space: pre-wrap; word-break: break-word; background: #0a1120; border: 1px solid var(--line); border-radius: 8px; padding: 13px; min-height: 130px; color: #c6d3e8; overflow: auto; max-height: 420px; }
+.hidden { display: none; }
+@media (max-width: 800px) { .topbar, .shell { padding-left: 18px; padding-right: 18px; } .topbar { align-items: flex-start; gap: 15px; flex-direction: column; } .summary-grid { grid-template-columns: repeat(2, 1fr); } .detail-grid { grid-template-columns: 1fr; } }
