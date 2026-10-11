@@ -15,6 +15,30 @@ reporting the next evidence gate. The scripts below are session tools; a
 successful script invocation does not itself mean that a task or delivery is
 complete.
 
+## Hierarchical supervisor mode
+
+The production Skill supports native OpenCode Task dispatch and headless Orca
+CLI dispatch. The top Agent is a supervisor, not a task author. It hires one
+producer employee per task; that producer owns the complete Seed-to-pre-rollout
+workflow and may request child Tasks through the supervisor. An independent QC
+employee performs QC-1 and, after a repair, QC-2. The top Agent approves or
+escalates decisions, and the owner is consulted for serious QC-2 exceptions.
+
+Initialize the transport-neutral ledger with:
+
+```bash
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  supervisor-init CAMPAIGN --mode dual --max-concurrent 100
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  employee-status CAMPAIGN
+```
+
+The campaign's `supervision.max_concurrent` is admission control, not a promise
+that the host can run that many model processes. The supervisor must apply
+resource and provider limits. Fired employees and their child trees are
+archived, never deleted. A replacement gets a new employee identity and a new
+Seed. See `references/supervisor-protocol.md` for the complete contract.
+
 The owner may invoke the Skill in `rehearsal` mode to test the production line.
 Rehearsal may discover and pin Seeds, run bounded micro-prototypes and verify
 gates, but its files stay outside customer inputs and do not promote a Seed,

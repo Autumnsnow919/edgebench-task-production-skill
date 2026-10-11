@@ -73,8 +73,9 @@ def validate_campaign_config(config: dict) -> dict:
         "funnel_multipliers", "allowed_licenses", "required_dedup_catalogs",
         "max_promoted_per_upstream", "max_promoted_per_dataset",
     }
-    if set(config) != required:
-        raise common.PipelineError(f"campaign config keys must be exactly {sorted(required)}")
+    allowed = required | {"supervision"}
+    if not set(config) <= allowed:
+        raise common.PipelineError(f"campaign config contains unknown keys: {sorted(set(config) - allowed)}")
     if config.get("schema_version") != 1 or type(config.get("schema_version")) is not int:
         raise common.PipelineError("campaign schema_version must be integer 1")
     if not _text(config.get("campaign_id")):
@@ -104,6 +105,24 @@ def validate_campaign_config(config: dict) -> dict:
     for key in ("max_promoted_per_upstream", "max_promoted_per_dataset"):
         if type(config.get(key)) is not int or config[key] <= 0:
             raise common.PipelineError(f"{key} must be a positive integer")
+    supervision = config.get("supervision")
+    if supervision is not None:
+        if not isinstance(supervision, dict) or set(supervision) != {
+            "max_concurrent", "transport_modes", "employee_unit", "max_child_tasks"
+        }:
+            raise common.PipelineError(
+                "supervision must declare max_concurrent, transport_modes, employee_unit and max_child_tasks"
+            )
+        if type(supervision["max_concurrent"]) is not int or supervision["max_concurrent"] < 1:
+            raise common.PipelineError("supervision.max_concurrent must be a positive integer")
+        if (not isinstance(supervision["transport_modes"], list)
+                or not supervision["transport_modes"]
+                or not all(item in {"opencode-task", "orca-cli"} for item in supervision["transport_modes"])):
+            raise common.PipelineError("supervision.transport_modes must name OpenCode or Orca")
+        if supervision["employee_unit"] != "one-task":
+            raise common.PipelineError("supervision.employee_unit must be one-task")
+        if type(supervision["max_child_tasks"]) is not int or supervision["max_child_tasks"] < 0:
+            raise common.PipelineError("supervision.max_child_tasks must be nonnegative")
     common.canonical_sha256(config)
     return config
 

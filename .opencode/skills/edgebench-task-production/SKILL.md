@@ -14,6 +14,10 @@ the current V1 portion of `EdgeBench Vendor Dataset Requirements.md`.
 Before authoring or measuring a task, also read
 `edgebench-task-generator/references/authoring-lessons-2026-10-05.md`; before
 repairing one, read `edgebench-task-generator/references/repair-evidence-and-reply.md`.
+For hierarchical production, read
+`edgebench-task-generator/references/supervisor-protocol.md`. The supervisor
+may be the OpenCode main session or a headless Orca CLI coordinator; do not
+assume that a desktop UI exists.
 `edgebench-task-generator/references/vendor-v3-applicability.md` records the
 scope and unresolved external delivery questions. Their Harbor-format clauses
 apply when Harbor is selected; they are not evidence that an SForge ZIP passed
@@ -42,11 +46,13 @@ task, authorize rollout, or qualify as delivery evidence. Use a separate
 an isolated temporary or private review workspace and label every result
 `rehearsal`, `prototype-only`, `blocked`, or `incomplete` as applicable.
 
-This Skill is used by the current OpenCode session as the main task-authoring
-entry point. It must carry the user request through the production stages; it
-must not stop at a list of CLI commands or treat an old sample package as the
-new task. The main session owns the task workspace, requirement interpretation,
-profile choice, task identity, review decision and evidence integration.
+In hierarchical mode, the supervisor carries the campaign request through the
+production stages while a producer employee owns exactly one task. The producer
+may complete the full workflow and request child OpenCode Tasks, but the
+supervisor alone approves state transitions, QC exceptions, freezes,
+replacement and delivery. A separate QC employee must review the producer's
+task. In single-agent mode the current OpenCode session may still own the task
+directly; it must not treat an old sample package as a new task.
 
 At the start of a new authoring request, collect or locate:
 
@@ -194,6 +200,24 @@ its SHA-256 and require all worker writes/tool working directories under its
 and mirror evidence there. The main reviewer alone integrates campaign writes.
 Reserve a separate `job_root` with `agent-workspace-reserve` for every extra
 parallel scout, feasibility or reviewer worker; retries never reuse paths.
+
+For the employee/supervisor mode, initialize the ledger and use the
+transport-neutral commands in
+`edgebench-task-generator/references/supervisor-protocol.md`:
+
+```bash
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  supervisor-init CAMPAIGN --mode dual --max-concurrent 100
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  employee-status CAMPAIGN
+```
+
+`opencode-task` dispatch is executed by the current OpenCode session. `orca-cli`
+dispatch is consumed by a headless `orca serve` runtime. Both paths write the
+same employee, QC, rollout-gate and replacement receipts. A producer's rollout
+is observed by the deterministic monitor; provider/model/container failures
+retry the same frozen task, while a profile-defined early score upper bound
+fires the producer tree and requires a new Seed.
 
 Source/dedup/redistribution and SForge dual-entry checks are owner-scoped
 items unless the current delivery contract restores them; they are not

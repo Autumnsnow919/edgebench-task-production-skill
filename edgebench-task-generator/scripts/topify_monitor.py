@@ -12,6 +12,8 @@ from pathlib import Path
 import subprocess
 
 import topify_common as common
+import topify_profile
+import topify_supervisor
 import topify_validate
 
 
@@ -112,6 +114,34 @@ def observe(workspace: str | Path, log_dir: str | Path, run_id: str, now: float 
                 reasons.append("run_finished_before_full_budget")
         except common.PipelineError:
             reasons.append("invalid_final_result")
+    supervisor_gate = None
+    try:
+        profile_receipt = topify_profile.current(root, task_sha256)
+        if profile_receipt:
+            profile = topify_profile.load_profile(
+                profile_receipt["profile_id"], profile_receipt["profile_path"]
+            )
+            if "supervision" in profile:
+                supervisor_gate = topify_supervisor.evaluate_rollout(
+                    profile,
+                    {
+                        "run_id": run_id,
+                        "status": "observing",
+                        "elapsed_seconds": elapsed,
+                        "trajectory": trajectory,
+                        "signals": reasons,
+                    },
+                    final=finished,
+                )
+                if supervisor_gate["status"] not in {"CONTINUE", "ACCEPT"}:
+                    reasons.append(f"supervisor:{supervisor_gate['status']}")
+            else:
+                supervisor_gate = {"status": "NOT_CONFIGURED", "reasons": ["profile_policy_absent"]}
+        else:
+            supervisor_gate = {"status": "NOT_CONFIGURED", "reasons": ["profile_not_bound"]}
+    except (common.PipelineError, OSError, ValueError, TypeError) as exc:
+        supervisor_gate = {"status": "EVIDENCE_INCOMPLETE", "reasons": [str(exc)]}
+        reasons.append("supervisor:evidence_incomplete")
     return {
         "run_id": run_id,
         "task_sha256": task_sha256,
@@ -125,6 +155,7 @@ def observe(workspace: str | Path, log_dir: str | Path, run_id: str, now: float 
         "finished": finished,
         "status": "review-needed" if reasons else "observing",
         "signals": reasons,
+        "supervisor_gate": supervisor_gate,
         "note": "Diagnostics require main-agent investigation; do not stop or rewrite a running trial.",
     }
 

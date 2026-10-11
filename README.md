@@ -40,6 +40,32 @@ requirements → profile → source scout → pinned mirror
 → trajectory collection → selected-format package → rl-task-qc
 ```
 
+## Hierarchical production with OpenCode or headless Orca
+
+The bundle also supports a supervisor/employee mode. One producer employee
+owns one task from Seed through pre-rollout; an independent QC employee runs
+QC-1 and QC-2; the producer executes the approved rollout; and a deterministic
+controller reports profile-bound checkpoints to the supervisor. The supervisor
+can archive a failed producer tree and hire a replacement with a new Seed.
+
+This does not require a desktop UI. Use OpenCode's native Task dispatch, or
+run Orca headlessly and consume the same JSON dispatch/receipt files:
+
+```bash
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  supervisor-init CAMPAIGN --mode dual --max-concurrent 100
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  employee-status CAMPAIGN
+
+# Optional headless Orca runtime on the worker host:
+orca serve --port 6768 --pairing-address SERVER_HOSTNAME
+orca status --json
+orca skills install --skill orca-cli --skill orchestration
+```
+
+The full authority, QC, replacement, checkpoint and `orca orchestration`
+mapping is in `edgebench-task-generator/references/supervisor-protocol.md`.
+
 Use `rehearsal` mode for production-line tests. Rehearsal artifacts are private
 and never count as Seed promotion, formal task delivery, model rollout or
 customer acceptance.

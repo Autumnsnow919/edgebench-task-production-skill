@@ -39,6 +39,7 @@ import topify_sforge_delivery
 import topify_sforge_acceptance
 import topify_sforge_batch
 import topify_validate
+import topify_supervisor
 
 
 def initialize(workspace: Path, request_path: Path) -> dict:
@@ -237,6 +238,76 @@ def parser() -> argparse.ArgumentParser:
     campaign.add_argument("--config", required=True, type=Path)
     campaign_status = commands.add_parser("campaign-status")
     campaign_status.add_argument("workspace", type=Path)
+    supervisor_init = commands.add_parser(
+        "supervisor-init", help="initialize the OpenCode/Orca-neutral supervisor ledger"
+    )
+    supervisor_init.add_argument("workspace", type=Path)
+    supervisor_init.add_argument("--mode", choices=("dual", "opencode-task", "orca-cli"), default="dual")
+    supervisor_init.add_argument("--max-concurrent", type=int)
+    employee_hire = commands.add_parser("employee-hire", help="register one one-task production employee")
+    employee_hire.add_argument("workspace", type=Path)
+    employee_hire.add_argument("--employee-id", required=True)
+    employee_hire.add_argument("--role", choices=sorted(topify_supervisor.ROLES), required=True)
+    employee_hire.add_argument("--transport", choices=sorted(topify_supervisor.TRANSPORTS), required=True)
+    employee_hire.add_argument("--task-id")
+    employee_hire.add_argument("--seed-id")
+    employee_hire.add_argument("--parent-id")
+    employee_hire.add_argument("--prompt-file", type=Path)
+    employee_hire.add_argument("--replacement-of")
+    employee_status = commands.add_parser("employee-status", help="show supervisor employees and alerts")
+    employee_status.add_argument("workspace", type=Path)
+    employee_fire = commands.add_parser("employee-fire", help="record a controlled employee termination")
+    employee_fire.add_argument("workspace", type=Path)
+    employee_fire.add_argument("--employee-id", required=True)
+    employee_fire.add_argument("--reason", required=True)
+    employee_fire.add_argument("--evidence", type=Path)
+    child_request = commands.add_parser("child-request", help="stage a child Task request for supervisor dispatch")
+    child_request.add_argument("workspace", type=Path)
+    child_request.add_argument("--parent-id", required=True)
+    child_request.add_argument("--child-id", required=True)
+    child_request.add_argument("--role", choices=sorted(topify_supervisor.ROLES), required=True)
+    child_request.add_argument("--transport", choices=sorted(topify_supervisor.TRANSPORTS), required=True)
+    child_request.add_argument("--objective", required=True)
+    child_request.add_argument("--task-id")
+    child_request.add_argument("--seed-id")
+    child_request.add_argument("--prompt-file", type=Path)
+    supervisor_dispatch = commands.add_parser("supervisor-dispatch", help="emit one signed transport-neutral worker dispatch")
+    supervisor_dispatch.add_argument("workspace", type=Path)
+    supervisor_dispatch.add_argument("--employee-id", required=True)
+    supervisor_dispatch.add_argument("--output", type=Path)
+    employee_report = commands.add_parser("employee-report", help="record a worker heartbeat or completion report")
+    employee_report.add_argument("workspace", type=Path)
+    employee_report.add_argument("--employee-id", required=True)
+    employee_report.add_argument("--input", required=True, type=Path)
+    qc_decision = commands.add_parser("qc-decision", help="bind an independent QC decision to a producer")
+    qc_decision.add_argument("workspace", type=Path)
+    qc_decision.add_argument("--producer-id", required=True)
+    qc_decision.add_argument("--qc-id", required=True)
+    qc_decision.add_argument("--round", required=True, type=int)
+    qc_decision.add_argument("--decision", choices=sorted(topify_supervisor.QC_STATES), required=True)
+    qc_decision.add_argument("--severity", choices=sorted(topify_supervisor.QC_SEVERITIES), required=True)
+    qc_decision.add_argument("--report", required=True, type=Path)
+    qc_decision.add_argument("--note", required=True)
+    qc_resolve = commands.add_parser("qc-resolve", help="record a supervisor/user decision on QC escalation")
+    qc_resolve.add_argument("workspace", type=Path)
+    qc_resolve.add_argument("--producer-id", required=True)
+    qc_resolve.add_argument("--decision", choices=sorted(topify_supervisor.QC_DECISIONS), required=True)
+    qc_resolve.add_argument("--note", required=True)
+    qc_resolve.add_argument("--evidence", type=Path)
+    rollout_gate = commands.add_parser("supervisor-rollout-gate", help="evaluate profile-bound early rollout policy")
+    rollout_gate.add_argument("workspace", type=Path)
+    rollout_gate.add_argument("--employee-id", required=True)
+    rollout_gate.add_argument("--observations", required=True, type=Path)
+    rollout_gate.add_argument("--profile-file", type=Path)
+    rollout_gate.add_argument("--task-workspace", type=Path)
+    rollout_gate.add_argument("--final", action="store_true")
+    replacement = commands.add_parser("replacement-order", help="fire replacement order for a new Seed")
+    replacement.add_argument("workspace", type=Path)
+    replacement.add_argument("--former-employee-id", required=True)
+    replacement.add_argument("--new-employee-id", required=True)
+    replacement.add_argument("--new-seed-id", required=True)
+    replacement.add_argument("--transport", choices=sorted(topify_supervisor.TRANSPORTS), required=True)
+    replacement.add_argument("--prompt-file", type=Path)
     domain_plan = commands.add_parser("domain-plan")
     domain_plan.add_argument("workspace", type=Path)
     domain_plan.add_argument("--playbook", type=Path, default=topify_domain.PLAYBOOK)
@@ -550,6 +621,56 @@ def main(argv: list[str] | None = None) -> int:
             report, code = topify_seed.initialize_campaign(args.workspace, args.config), 0
         elif args.command == "campaign-status":
             report, code = topify_seed.campaign_status(args.workspace), 0
+        elif args.command == "supervisor-init":
+            report, code = topify_supervisor.initialize(
+                args.workspace, args.mode, args.max_concurrent
+            )
+        elif args.command == "employee-hire":
+            report, code = topify_supervisor.hire(
+                args.workspace, args.employee_id, args.role, args.transport,
+                args.task_id, args.seed_id, args.parent_id, args.prompt_file,
+                args.replacement_of,
+            )
+        elif args.command == "employee-status":
+            report, code = topify_supervisor.status(args.workspace)
+        elif args.command == "employee-fire":
+            report, code = topify_supervisor.fire(
+                args.workspace, args.employee_id, args.reason, args.evidence
+            )
+        elif args.command == "child-request":
+            report, code = topify_supervisor.child_request(
+                args.workspace, args.parent_id, args.child_id, args.role,
+                args.objective, args.transport, args.task_id, args.seed_id,
+                args.prompt_file,
+            )
+        elif args.command == "supervisor-dispatch":
+            report, code = topify_supervisor.dispatch(
+                args.workspace, args.employee_id, args.output
+            )
+        elif args.command == "employee-report":
+            report, code = topify_supervisor.report(
+                args.workspace, args.employee_id, args.input
+            )
+        elif args.command == "qc-decision":
+            report, code = topify_supervisor.qc_decision(
+                args.workspace, args.producer_id, args.qc_id, args.round,
+                args.decision, args.severity, args.report, args.note,
+            )
+        elif args.command == "qc-resolve":
+            report, code = topify_supervisor.qc_resolve(
+                args.workspace, args.producer_id, args.decision,
+                args.note, args.evidence,
+            )
+        elif args.command == "supervisor-rollout-gate":
+            report, code = topify_supervisor.rollout_gate(
+                args.workspace, args.employee_id, args.observations,
+                args.profile_file, args.task_workspace, args.final,
+            )
+        elif args.command == "replacement-order":
+            report, code = topify_supervisor.replace_seed(
+                args.workspace, args.former_employee_id, args.new_employee_id,
+                args.new_seed_id, args.transport, args.prompt_file,
+            )
         elif args.command == "domain-plan":
             report, code = topify_domain.plan(args.workspace, args.playbook,
                                               limit=args.limit), 0

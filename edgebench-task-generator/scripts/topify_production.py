@@ -124,11 +124,20 @@ def _verifier_state(root: Path) -> tuple[set[str], dict[str, str], set[str]]:
 
 def plan(workspace: str | Path, verifier_workers: int = 6, author_workers: int = 4) -> dict:
     """Read-only balanced proposals. A plan never accepts a Seed or creates a task."""
-    if type(verifier_workers) is not int or not 1 <= verifier_workers <= 6:
-        raise common.PipelineError("source verification concurrency must be 1..6")
-    if type(author_workers) is not int or not 1 <= author_workers <= 4:
-        raise common.PipelineError("authoring concurrency must be 1..4")
     root, _ = topify_seed.load_campaign(workspace)
+    campaign = common.load_json(root / "campaign.json")
+    supervision = campaign.get("config", {}).get("supervision", {})
+    max_concurrent = supervision.get("max_concurrent", 6)
+    if type(max_concurrent) is not int or max_concurrent < 1:
+        raise common.PipelineError("campaign supervision max_concurrent is invalid")
+    if type(verifier_workers) is not int or not 1 <= verifier_workers <= max_concurrent:
+        raise common.PipelineError(
+            f"source verification concurrency must be 1..{max_concurrent}"
+        )
+    if type(author_workers) is not int or not 1 <= author_workers <= max_concurrent:
+        raise common.PipelineError(
+            f"authoring concurrency must be 1..{max_concurrent}"
+        )
     registry = topify_seed.validate_source_registry(common.load_json(REGISTRY))
     sources = {source["id"] for source in registry["sources"]}
     domain = topify_domain.plan(root, limit=author_workers)

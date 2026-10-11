@@ -12,6 +12,7 @@ import topify_validate
 
 PROFILE_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 REQUIRED_KEYS = {"schema_version", "profile_id", "benchmark", "requirements_precedence", "delivery", "capabilities", "thresholds", "gate_ids", "checks"}
+OPTIONAL_KEYS = {"supervision"}
 THRESHOLD_KEYS = {
     "interaction_budget_seconds_minimum", "interaction_budget_seconds_preferred",
     "frontier_trials_minimum", "reference_repeats", "architectures_required",
@@ -28,7 +29,8 @@ def load_profile(profile_id: str, profile_file: str | Path | None = None) -> dic
         raise common.PipelineError("profile_id must be a lowercase hyphenated identifier")
     path = Path(profile_file) if profile_file is not None else profiles_dir() / f"{profile_id}.json"
     value = common.load_json(path)
-    if set(value) != REQUIRED_KEYS or value.get("schema_version") != 1 or value.get("profile_id") != profile_id:
+    if (not REQUIRED_KEYS <= set(value) or set(value) - REQUIRED_KEYS - OPTIONAL_KEYS
+            or value.get("schema_version") != 1 or value.get("profile_id") != profile_id):
         raise common.PipelineError(f"profile keys or identity are invalid: {path}")
     if not isinstance(value.get("benchmark"), str) or not value["benchmark"].strip():
         raise common.PipelineError("profile benchmark must be nonempty")

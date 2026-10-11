@@ -29,6 +29,12 @@
     "GDPval",
     "local-candidates"
   ],
+  "supervision": {
+    "max_concurrent": 100,
+    "transport_modes": ["opencode-task", "orca-cli"],
+    "employee_unit": "one-task",
+    "max_child_tasks": 32
+  },
   "schema_version": 1,
   "target_task_count": 100
 }

@@ -38,5 +38,39 @@
     "native_cross_architecture": false,
     "source_rights_dedup": "user_requirements",
     "sforge_dual_entry": "not_required_by_user"
+  },
+  "supervision": {
+    "employee_unit": "one-task",
+    "qc": {
+      "max_rounds": 2,
+      "qc2_escalation": "supervisor-user"
+    },
+    "rollout": {
+      "checkpoints": [
+        {
+          "name": "early-1",
+          "after_seconds": 1800,
+          "mode": "observe",
+          "metric": "best_score"
+        },
+        {
+          "name": "early-2",
+          "after_seconds": 3600,
+          "mode": "observe",
+          "metric": "best_score"
+        }
+      ],
+      "growth": {
+        "enabled": true,
+        "metric": "best_score",
+        "baseline": "requirements",
+        "operator": "gt",
+        "min_delta": 0
+      },
+      "final": {
+        "source": "requirements-document",
+        "low_result_action": "owner_review"
+      }
+    }
   }
 }

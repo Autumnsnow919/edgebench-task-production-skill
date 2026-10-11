@@ -40,6 +40,20 @@ requirements → profile → source scout → pinned mirror
 → trajectory collection → selected-format package → rl-task-qc
 ```
 
+For hierarchical production, initialize the transport-neutral supervisor ledger:
+
+```bash
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  supervisor-init CAMPAIGN --mode dual --max-concurrent 100
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  employee-status CAMPAIGN
+```
+
+The same ledger can be dispatched through OpenCode Tasks or a headless Orca
+runtime. See `edgebench-task-generator/references/supervisor-protocol.md` for
+employee identity, independent QC, profile-bound rollout checkpoints and
+replacement rules.
+
 Use `rehearsal` mode for production-line tests. Rehearsal artifacts are private
 and never count as Seed promotion, formal task delivery, model rollout or
 customer acceptance.

@@ -35,6 +35,35 @@ The profile contains:
 - `thresholds.q_review_required` and `q_review_not_required`;
 - `checks`, for format-specific and benchmark-specific applicability.
 
+For hierarchical production, add the optional `supervision` object. It binds
+the employment and rollout policy to the Benchmark rather than hard-coding
+EdgeBench rules in the supervisor:
+
+```json
+{
+  "supervision": {
+    "employee_unit": "one-task",
+    "qc": {"max_rounds": 2, "qc2_escalation": "supervisor-user"},
+    "rollout": {
+      "checkpoints": [
+        {"name": "30m", "after_seconds": 1800, "mode": "observe", "metric": "best_score"},
+        {"name": "1h", "after_seconds": 3600, "mode": "upper_bound",
+         "metric": "best_score", "operator": "gte", "value": 80}
+      ],
+      "growth": {"enabled": true, "metric": "best_score", "baseline": "nop",
+                  "operator": "gt", "min_delta": 0},
+      "final": {"source": "requirements-document", "low_result_action": "owner_review"}
+    }
+  }
+}
+```
+
+`upper_bound` means the task is too easy when the bound is reached at the
+specified checkpoint. A provider, model, container, or judge failure is not a
+quality failure and must be represented as an infrastructure retry. For a
+binary-reward Benchmark, use `best_reward` and define its growth semantics in
+the user requirements/profile; do not reuse the EdgeBench score threshold.
+
 Use `references/profiles/edgebench-v1.json` for the current EdgeBench defaults.
 Use `examples/custom-benchmark-profile.json` as a small custom profile example.
 The example intentionally uses a shorter budget, fewer frontier trials and
