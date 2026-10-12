@@ -222,6 +222,10 @@ class ConsoleState:
         self.owner_token = (owner_token or _token()) if self.auth_enabled else None
         if self.auth_enabled:
             self.tokens[_token_hash(self.owner_token)] = ("owner", None)
+        if self.scan_roots:
+            # __init__ already performed the initial registry discovery above;
+            # do not repeat the recursive scan on the first dashboard click.
+            self._discovery_at = time.monotonic()
 
     def auth(self, value: str | None) -> tuple[str, str | None] | None:
         if not self.auth_enabled:
