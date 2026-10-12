@@ -40,6 +40,7 @@ import topify_sforge_acceptance
 import topify_sforge_batch
 import topify_validate
 import topify_supervisor
+import topify_employees
 import topify_web
 
 
@@ -259,6 +260,16 @@ def parser() -> argparse.ArgumentParser:
     employee_hire.add_argument("--prompt-file", type=Path)
     employee_hire.add_argument("--replacement-of")
     employee_hire.add_argument("--fingerprint-file", type=Path)
+    employee_bind = commands.add_parser("employee-session-bind", help="bind an employee to its actual persistent OpenCode session")
+    employee_bind.add_argument("workspace", type=Path)
+    employee_bind.add_argument("--employee-id", required=True)
+    employee_bind.add_argument("--session-id", required=True)
+    employee_bind.add_argument("--dispatch-id")
+    seed_bind = commands.add_parser("producer-seed-bind", help="approve the producer-owned screened Seed and reserve its fingerprint")
+    seed_bind.add_argument("workspace", type=Path)
+    seed_bind.add_argument("--employee-id", required=True)
+    seed_bind.add_argument("--seed-id", required=True)
+    seed_bind.add_argument("--screen-receipt", required=True, type=Path)
     employee_status = commands.add_parser("employee-status", help="show supervisor employees and alerts")
     employee_status.add_argument("workspace", type=Path)
     supervisor_dashboard = commands.add_parser("supervisor-dashboard", help="show chat-friendly worker progress and alerts")
@@ -297,6 +308,11 @@ def parser() -> argparse.ArgumentParser:
     supervisor_dispatch.add_argument("workspace", type=Path)
     supervisor_dispatch.add_argument("--employee-id", required=True)
     supervisor_dispatch.add_argument("--output", type=Path)
+    for name in ("producer-plan", "producer-dispatch"):
+        command = commands.add_parser(name, help="plan/prepare producer-first full-task employees")
+        command.add_argument("workspace", type=Path)
+        command.add_argument("--count", type=int)
+        command.add_argument("--transport", choices=sorted(topify_supervisor.TRANSPORTS), default="opencode-task")
     employee_report = commands.add_parser("employee-report", help="record a worker heartbeat or completion report")
     employee_report.add_argument("workspace", type=Path)
     employee_report.add_argument("--employee-id", required=True)
@@ -365,10 +381,14 @@ def parser() -> argparse.ArgumentParser:
     production_plan.add_argument("workspace", type=Path)
     production_plan.add_argument("--verifiers", type=int, default=6)
     production_plan.add_argument("--authors", type=int, default=4)
+    production_plan.add_argument("--producers", type=int)
+    production_plan.add_argument("--legacy-workers", action="store_true")
     production_dispatch = commands.add_parser("production-dispatch")
     production_dispatch.add_argument("workspace", type=Path)
     production_dispatch.add_argument("--verifiers", type=int, default=6)
     production_dispatch.add_argument("--authors", type=int, default=4)
+    production_dispatch.add_argument("--producers", type=int)
+    production_dispatch.add_argument("--legacy-workers", action="store_true")
     auxiliary_workspace = commands.add_parser("agent-workspace-reserve")
     auxiliary_workspace.add_argument("workspace", type=Path)
     auxiliary_workspace.add_argument("--job-id", required=True)
@@ -381,6 +401,7 @@ def parser() -> argparse.ArgumentParser:
     production_tick.add_argument("--timeout", type=int, default=900)
     production_tick.add_argument("--execute", action="store_true")
     production_tick.add_argument("--notify-main", action="store_true")
+    production_tick.add_argument("--legacy-workers", action="store_true")
     feasibility_plan = commands.add_parser("feasibility-plan")
     feasibility_plan.add_argument("workspace", type=Path)
     feasibility_plan.add_argument("--seed-id", required=True, action="append")
@@ -681,6 +702,12 @@ def main(argv: list[str] | None = None) -> int:
                 args.task_id, args.seed_id, args.parent_id, args.prompt_file,
                 args.replacement_of, args.fingerprint_file,
             )
+        elif args.command == "employee-session-bind":
+            report, code = topify_supervisor.bind_session(
+                args.workspace, args.employee_id, args.session_id, args.dispatch_id)
+        elif args.command == "producer-seed-bind":
+            report, code = topify_supervisor.bind_seed(
+                args.workspace, args.employee_id, args.seed_id, args.screen_receipt)
         elif args.command == "employee-status":
             report, code = topify_supervisor.status(args.workspace)
         elif args.command == "supervisor-dashboard":
@@ -707,6 +734,10 @@ def main(argv: list[str] | None = None) -> int:
             report, code = topify_supervisor.dispatch(
                 args.workspace, args.employee_id, args.output
             )
+        elif args.command == "producer-plan":
+            report, code = topify_employees.plan(args.workspace, args.count, args.transport), 0
+        elif args.command == "producer-dispatch":
+            report, code = topify_employees.prepare(args.workspace, args.count, args.transport)
         elif args.command == "employee-report":
             report, code = topify_supervisor.report(
                 args.workspace, args.employee_id, args.input
@@ -760,13 +791,18 @@ def main(argv: list[str] | None = None) -> int:
             report, code = topify_domain.plan(args.workspace, args.playbook,
                                               limit=args.limit), 0
         elif args.command == "production-plan":
-            report, code = topify_production.plan(args.workspace, args.verifiers, args.authors), 0
+            report, code = (topify_production.plan(args.workspace, args.verifiers, args.authors)
+                            if args.legacy_workers else topify_employees.plan(args.workspace, args.producers)), 0
         elif args.command == "production-dispatch":
-            report, code = topify_production.dispatch_native(args.workspace, args.verifiers, args.authors)
+            report, code = (topify_production.dispatch_native(args.workspace, args.verifiers, args.authors)
+                            if args.legacy_workers else topify_employees.prepare(args.workspace, args.producers))
         elif args.command == "agent-workspace-reserve":
             report, code = topify_production.reserve_auxiliary_workspace(
                 args.workspace, args.job_id, args.role)
         elif args.command == "production-tick":
+            if not args.legacy_workers:
+                raise common.PipelineError("producer-first uses producer-dispatch and persistent employee sessions; "
+                                           "legacy timer execution requires explicit --legacy-workers")
             report, code = topify_production.tick(
                 args.workspace, args.verifiers, args.authors,
                 args.opencode, args.execute, args.timeout, args.notify_main,

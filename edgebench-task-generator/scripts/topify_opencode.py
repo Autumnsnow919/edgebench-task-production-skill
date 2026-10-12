@@ -8,9 +8,12 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import re
 from urllib.parse import urlencode
 
 import topify_common as common
+
+SESSION_ID = re.compile(r"ses_[a-zA-Z0-9]{20,80}\Z")
 
 
 def _binary() -> str | None:
@@ -44,6 +47,26 @@ def _get(path: str, timeout: int = 15) -> dict:
         raise common.PipelineError("OpenCode API returned invalid session JSON") from exc
     if not isinstance(value, dict):
         raise common.PipelineError("OpenCode API session response is not an object")
+    return value
+
+
+def _post(path: str, payload: dict, timeout: int = 30) -> dict:
+    binary = _binary()
+    if not binary:
+        raise common.PipelineError("OpenCode CLI is unavailable")
+    result = subprocess.run(
+        [binary, "api", "post", path, "--data", json.dumps(payload, ensure_ascii=False)],
+        cwd="/", env=os.environ.copy(), stdin=subprocess.DEVNULL,
+        capture_output=True, timeout=timeout, check=False,
+    )
+    if result.returncode != 0:
+        raise common.PipelineError("OpenCode API message send failed")
+    try:
+        value = json.loads(result.stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise common.PipelineError("OpenCode API returned invalid message JSON") from exc
+    if not isinstance(value, dict):
+        raise common.PipelineError("OpenCode API message response is not an object")
     return value
 
 
@@ -83,3 +106,52 @@ def sessions(directory: str | Path, limit: int = 200) -> dict:
         "sessions": result,
         "active_count": sum(item["status"] == "running" for item in result),
     }
+
+
+def _visible_session(directory: str | Path, session_id: str) -> dict:
+    if not isinstance(session_id, str) or SESSION_ID.fullmatch(session_id) is None:
+        raise common.PipelineError("invalid OpenCode session ID")
+    value = sessions(directory, limit=300)
+    item = next((item for item in value["sessions"] if item["session_id"] == session_id), None)
+    if item is None:
+        raise common.PipelineError("OpenCode session is not visible under the approved scan root")
+    return item
+
+
+def messages(directory: str | Path, session_id: str, limit: int = 100) -> dict:
+    _visible_session(directory, session_id)
+    if type(limit) is not int or not 1 <= limit <= 300:
+        raise common.PipelineError("OpenCode message limit must be between 1 and 300")
+    raw = _get(f"/api/session/{session_id}/message?limit={limit}&order=asc")
+    result = []
+    for item in raw.get("data", []):
+        if not isinstance(item, dict):
+            continue
+        parts = []
+        if isinstance(item.get("text"), str):
+            parts.append(item["text"])
+        for content in item.get("content", []):
+            if not isinstance(content, dict):
+                continue
+            if content.get("type") == "text" and isinstance(content.get("text"), str):
+                parts.append(content["text"])
+            elif content.get("type") == "tool":
+                parts.append(f"[tool: {content.get('name', 'unknown')}]")
+        text = "\n".join(part for part in parts if part).strip()
+        if text:
+            result.append({
+                "message_id": item.get("id"),
+                "type": item.get("type"),
+                "agent": item.get("agent"),
+                "text": text,
+                "created_at": item.get("time", {}).get("created"),
+            })
+    return {"status": "ok", "session_id": session_id, "messages": result}
+
+
+def send_message(directory: str | Path, session_id: str, text: str) -> dict:
+    _visible_session(directory, session_id)
+    if not isinstance(text, str) or not text.strip() or len(text) > 20_000:
+        raise common.PipelineError("OpenCode session message must be nonempty and at most 20000 characters")
+    result = _post(f"/api/session/{session_id}/prompt", {"text": text.strip(), "resume": True})
+    return {"status": "sent", "session_id": session_id, "response": result}

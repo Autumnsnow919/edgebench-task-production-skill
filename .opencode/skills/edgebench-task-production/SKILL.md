@@ -236,25 +236,28 @@ the current adapter, stop before authoring and ask for a compatible adapter or
 an explicit user decision. Do not discover adapter incompatibility after a
 rollout.
 
-Use the reusable campaign dispatch path when the user explicitly asks for a
-multi-task or parallel campaign. For one task, the main session can execute the
-authoring commands directly and review each generated file and process receipt
-itself. The task-generation step is part of this Skill's workflow; packaging
-and rollout are later stages and must not be implied by successful generation.
+For a batch request, use the employee/supervisor path as the default. Hire and
+dispatch one `edgebench-producer` per target task **before** creating any
+standalone scout pool. Each producer owns the entire task lifecycle and begins
+Seed discovery itself inside its exclusive job_root; it may request
+`edgebench-seed-worker` or `edgebench-prototype-worker` children through the
+supervisor. A standalone scout/verifier/author pool is legacy compatibility
+behavior and may run only when the owner explicitly asks for source scouting or
+legacy campaign dispatch. Never count a scout as a producer or a source lead as
+a completed task.
 
-Operate the reusable campaign, rather than repeatedly hand-authoring one
-favorite task. First run read-only `production-plan CAMPAIGN`, then
-`production-dispatch CAMPAIGN --verifiers 6 --authors 4`. Dispatch its named
-native Task subagents in this conversation, review their actual files/process
-receipts and `verifier-collect`/`author-collect` every job. Use unattended
-`production-tick --execute --notify-main` only on an owner-approved timer host.
-Every dispatched author/verifier gets a new exclusive
-`CAMPAIGN/agent-workspaces/<job-id>/`; send the signed prompt without changing
-its SHA-256 and require all worker writes/tool working directories under its
-`job_root`. Authors write `task/` there, source verifiers stage `proposal.json`
-and mirror evidence there. The main reviewer alone integrates campaign writes.
-Reserve a separate `job_root` with `agent-workspace-reserve` for every extra
-parallel scout, feasibility or reviewer worker; retries never reuse paths.
+The producer-first loop is:
+
+```text
+hire producer → dispatch producer → producer finds Seed
+→ producer requests bounded children when needed
+→ producer r0/r1/r2 → independent QC → freeze → rollout
+```
+
+Every producer gets a new exclusive job_root; retries never reuse fired trees.
+The main supervisor reviews receipts, but does not take over the producer's
+task. `production-dispatch`/`production-tick` remain explicit legacy or
+unattended recovery tools, not the default interaction for a batch request.
 
 For the employee/supervisor mode, initialize the ledger and use the
 transport-neutral commands in

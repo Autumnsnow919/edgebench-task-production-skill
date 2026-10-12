@@ -97,15 +97,14 @@ available to a worker.
 
 ## Producer and child work
 
-Hire one producer per task:
+Hire one producer per task before creating standalone scout workers. The Seed is
+intentionally empty at hiring time; the producer owns discovery:
 
 ```bash
 python3 edgebench-task-generator/scripts/topify_pipeline.py \
   employee-hire CAMPAIGN --employee-id producer-001 \
   --role producer --transport opencode-task \
-  --seed-id systems-software-engineering/cpython/lead-001 \
-  --prompt-file WORK_ORDER.md \
-  --fingerprint-file PINNED_SEED_CARD.json
+  --prompt-file WORK_ORDER.md
 ```
 
 Strict campaigns reserve the Seed fingerprint before the producer is
@@ -120,7 +119,7 @@ The producer may request a child, but does not create it directly:
 ```bash
 python3 edgebench-task-generator/scripts/topify_pipeline.py \
   child-request CAMPAIGN --parent-id producer-001 \
-  --child-id producer-001-seed-01 --role producer \
+  --child-id producer-001-seed-01 --role seed-worker \
   --transport opencode-task --objective "Pin and verify the Seed source"
 ```
 
@@ -130,6 +129,20 @@ The supervisor then dispatches an employee through the emitted JSON contract:
 python3 edgebench-task-generator/scripts/topify_pipeline.py \
   supervisor-dispatch CAMPAIGN --employee-id producer-001
 ```
+
+For a batch, the producer-first helper plans or prepares employees without
+claiming that their OpenCode/Orca sessions have started:
+
+```bash
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  producer-plan CAMPAIGN --count 5 --transport opencode-task
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  producer-dispatch CAMPAIGN --count 5 --transport opencode-task
+```
+
+The main chat supervisor must bind each prepared dispatch to an actual
+OpenCode session (`employee-session-bind`) and then monitor heartbeats. The
+legacy `production-dispatch` command is not the default producer path.
 
 Every dispatch is bound to a prompt hash, contract hash and exclusive job root.
 Retries use a new dispatch attempt and never reuse a fired employee's worktree.

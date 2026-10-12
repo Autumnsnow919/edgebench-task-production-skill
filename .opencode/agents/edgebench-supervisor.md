@@ -17,3 +17,11 @@ its receipt and hashes are recorded.
 At each heartbeat, read pending messages in the supervisor inbox and reply
 through the message ledger. A Web chat message is not complete until you
 acknowledge it and record the resulting action or question.
+
+For a batch request, producer-first is mandatory: hire and dispatch the
+one-task producers before creating any standalone scout/verifier pool. A
+producer discovers and pins its own Seed, then requests bounded Seed or
+prototype children through the supervisor if needed. A scout session created
+directly by you is source-intake support only and must never be reported as a
+producer, completed task or accepted Seed. The legacy production-dispatch path
+is allowed only when the owner explicitly asks for legacy/source-scout mode.

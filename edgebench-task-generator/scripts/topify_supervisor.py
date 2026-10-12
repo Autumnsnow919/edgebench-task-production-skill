@@ -23,7 +23,13 @@ import topify_validate
 
 ID_RE = re.compile(r"[a-z0-9][a-z0-9-]{1,79}\Z")
 TASK_ID_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*/[A-Za-z][A-Za-z0-9_-]*\Z")
-ROLES = frozenset({"producer", "qc", "rollout"})
+CHILD_ROLES = frozenset({"seed-worker", "prototype-worker"})
+ROLES = frozenset({"producer", "qc", "rollout"}) | CHILD_ROLES
+ROLE_AGENTS = {
+    "producer": "edgebench-producer", "qc": "edgebench-qc",
+    "rollout": "edgebench-rollout", "seed-worker": "edgebench-seed-worker",
+    "prototype-worker": "edgebench-prototype-worker",
+}
 TRANSPORTS = frozenset({"opencode-task", "orca-cli"})
 EMPLOYEE_STATES = frozenset({
     "queued", "active", "running", "waiting-qc", "repair-required",
@@ -380,12 +386,16 @@ def hire(
             raise common.PipelineError("cannot hire a child under a fired employee")
         if parent_record.get("role") != "producer":
             raise common.PipelineError("only a producer employee may own child tasks")
+        if role not in CHILD_ROLES:
+            raise common.PipelineError("only Seed/prototype workers belong to a producer tree; QC is independent")
+    elif role in CHILD_ROLES:
+        raise common.PipelineError("Seed/prototype workers require a producer parent")
     old = None
     if replacement_of is not None:
         old = _employee(root, replacement_of)
         if old.get("role") != "producer" or old.get("employment_status") != "fired":
             raise common.PipelineError("replacement_of must identify a fired producer")
-        if seed_id is None or seed_id == old.get("seed_id"):
+        if seed_id is not None and seed_id == old.get("seed_id"):
             raise common.PipelineError("a replacement producer must receive a new Seed")
     dedup_claim = None
     if role == "producer" and seed_id is not None:
@@ -401,20 +411,21 @@ def hire(
                 raise common.PipelineError(
                     f"Seed dedup collision: {dedup_claim.get('fingerprint', 'unknown')}"
                 )
+    prompt = _regular_file(prompt_file, "prompt_file") if prompt_file is not None else None
     active = _active_count(root)
     state = "active" if active < manifest["max_concurrent"] else "queued"
     job_root = root / "supervision/agent-workspaces" / employee_id
     if job_root.exists() or job_root.is_symlink():
         raise common.PipelineError("employee job_root already exists")
     job_root.mkdir(mode=0o700)
-    prompt = None
-    if prompt_file is not None:
-        prompt = _regular_file(prompt_file, "prompt_file")
     value = {
         "schema_version": 1,
         "employee_id": employee_id,
         "parent_id": parent,
         "role": role,
+        "department": "quality" if role == "qc" else "rollout" if role == "rollout" else "production",
+        "owns_complete_task": role == "producer",
+        "phase": "seed-discovery" if role == "producer" and seed_id is None else "seed-review" if role == "producer" else "assigned",
         "transport": transport,
         "task_id": task_id,
         "seed_id": seed_id,
@@ -427,11 +438,63 @@ def hire(
         "hired_at": common.utc_now(),
     }
     value["employment_contract_sha256"] = common.canonical_sha256(value)
+    assignment_dir = root / "supervision/assignments"
+    assignment_dir.mkdir(exist_ok=True)
+    assignment = assignment_dir / f"{employee_id}.md"
+    assignment.write_text(_employment_prompt(root, manifest, value) +
+                          ("\n\n## Additional work order\n" + prompt.read_text(encoding="utf-8") if prompt else ""),
+                          encoding="utf-8")
+    value["prompt_path"] = str(assignment)
+    value["prompt_sha256"] = common.sha256_file(assignment)
+    value["employment_contract_sha256"] = common.canonical_sha256(value)
     common.write_new_json(path, value)
     _append(root, "employee_hired", employee_id=employee_id, role=role,
             parent_id=parent, employment_status=state,
             replacement_of=value["replacement_of"])
     return value, 0
+
+
+def _employment_prompt(root: Path, manifest: dict, employee: dict) -> str:
+    bundle = Path(__file__).resolve().parents[2]
+    identity = (f"# Employee {employee['employee_id']}\n"
+                f"Role: {employee['role']}\nLogical parent: {employee['parent_id']}\n"
+                f"Campaign: {root}\nExclusive writable job_root: {employee['job_root']}\n"
+                f"Benchmark: {manifest.get('benchmark')}\n"
+                f"Read the production Skill: {bundle / '.opencode/skills/edgebench-task-production/SKILL.md'}\n"
+                f"Read the locked contract: {root / 'requirements-profile-lock.json'} (if present).\n"
+                "Use absolute paths to your job_root for tool working directories and all staged writes. "
+                "Shared campaign, dedup registry and other employees are read-only. "
+                "The supervisor alone collects proposals and writes shared state.\n")
+    if employee["role"] == "producer":
+        return identity + (
+            "You own exactly ONE complete task, not a scout job. Begin by discovering and pinning "
+            "a Seed yourself. A pre-existing Seed pool is NOT a recruitment prerequisite. "
+            "Stage a seed-card.json, immutable input bytes, learning-loop feasibility evidence and "
+            "child-request proposals in your job_root. Ask the supervisor to dispatch bounded "
+            "edgebench-seed-worker / edgebench-prototype-worker children for you only if useful. "
+            "Do not launch a department-wide scout pool. The supervisor reviews and globally reserves "
+            "your Seed before authoring. Stop at each approval gate.\n"
+            "Retain this employee identity and this same OpenCode session (or Orca worker) across "
+            "Seed discovery, r0, r1, r2, QC repairs, approved rollout and packaging preparation. "
+            "Record stage-complete checkpoints, not terminal employee completion. "
+            "After measured r0 the supervisor says 'too simple'; after r1 it requires a second distinct "
+            "causal mechanism. Use new version workspaces and parent hashes; only r2 may enter QC. "
+            "QC is independent. No rollout without current freeze and supervisor/owner authorization. "
+            "After freeze never change scoring identity. Read Web inbox messages at checkpoints and "
+            "reply in your own conversation. Return actual paths, hashes, status and blockers, "
+            "never prose-only completion.\n"
+        )
+    if employee["role"] in CHILD_ROLES:
+        return identity + (
+            "You are bounded support for your named producer, not an independent task owner. "
+            "Stage source verification or micro-prototype evidence only in your job_root; "
+            "return to your producer. You cannot promote a Seed, approve QC or author a separate task.\n"
+        )
+    return identity + (
+        "You are independent of the producer tree. Review the assigned candidate read-only and "
+        "stage your QC/observation evidence only under your job_root. Do not edit the producer's "
+        "task or approve rollout yourself.\n"
+    )
 
 
 def status(workspace: str | Path) -> tuple[dict, int]:
@@ -619,6 +682,8 @@ def child_request(
         raise common.PipelineError("child role is invalid")
     if not _text(objective):
         raise common.PipelineError("child objective must be nonempty")
+    if role not in CHILD_ROLES:
+        raise common.PipelineError("producer children are Seed/prototype helpers, not QC or another task owner")
     max_children = _supervision_config(campaign)["max_child_tasks"]
     child_count = sum(
         item.get("parent_id") == parent_id and item.get("employment_status") != "fired"
@@ -672,6 +737,8 @@ def dispatch(workspace: str | Path, employee_id: str, output: str | Path | None 
     number, attempt = common.next_attempt(root / "supervision/dispatches" / employee_id)
     dispatch_id = f"{employee_id}-d{number:04d}"
     prompt = employee.get("prompt_path")
+    if prompt is None or common.sha256_file(prompt) != employee.get("prompt_sha256"):
+        raise common.PipelineError("employee assignment is missing or changed; do not dispatch a stale prompt")
     task = {
         "dispatch_id": dispatch_id,
         "employee_id": employee_id,
@@ -679,12 +746,9 @@ def dispatch(workspace: str | Path, employee_id: str, output: str | Path | None 
         "transport": employee["transport"],
         "task_id": employee.get("task_id"),
         "seed_id": employee.get("seed_id"),
-        "hardening_revision": (
-            0 if employee.get("hardening_revision") is None
-            else employee["hardening_revision"] + 1
-            if employee.get("employment_status") == "repair-required"
-            else employee.get("hardening_revision")
-        ),
+        "phase": employee.get("phase", "assigned"),
+        "hardening_revision": employee.get("requested_revision", employee.get("hardening_revision", 0)),
+        "continue_session_id": employee.get("session_id"),
         "job_root": employee["job_root"],
         "prompt_path": prompt,
         "prompt_sha256": employee.get("prompt_sha256"),
@@ -693,17 +757,15 @@ def dispatch(workspace: str | Path, employee_id: str, output: str | Path | None 
         "worker_contract": "send heartbeat while active; report completion exactly once; ask through supervisor gate",
         "open_code": {
             "action": "native-task-or-opencode-run",
-            "agent": {
-                "producer": "edgebench-producer",
-                "qc": "edgebench-qc",
-                "rollout": "edgebench-rollout",
-            }[employee["role"]],
+            "agent": ROLE_AGENTS[employee["role"]],
             "argv_template": [
                 "opencode", "run", "--agent",
-                {"producer": "edgebench-producer", "qc": "edgebench-qc", "rollout": "edgebench-rollout"}[employee["role"]],
+                ROLE_AGENTS[employee["role"]],
                 "--format", "json", "<signed-prompt-content>",
             ],
             "working_directory": employee["job_root"],
+            "session_id": employee.get("session_id"),
+            "lifecycle": "continue-same-employee-session; no-new-worker-per-stage",
         },
         "orca_cli": {
             "action": "orca orchestration worker-start",
@@ -735,10 +797,88 @@ def dispatch(workspace: str | Path, employee_id: str, output: str | Path | None 
 
 
 @mutation
+def bind_session(workspace, employee_id, session_id, dispatch_id=None):
+    import topify_opencode
+    root, campaign = _root(workspace)
+    _load_manifest(root, campaign)
+    employee = _employee(root, employee_id)
+    if employee.get("employment_status") == "fired":
+        raise common.PipelineError("cannot bind a fired employee")
+    if employee.get("transport") != "opencode-task":
+        raise common.PipelineError("session binding currently uses the OpenCode API")
+    if not topify_opencode.SESSION_ID.fullmatch(session_id):
+        raise common.PipelineError("invalid OpenCode session ID")
+    actual_dispatch = dispatch_id or employee.get("last_dispatch_id")
+    if actual_dispatch is None or actual_dispatch != employee.get("last_dispatch_id"):
+        raise common.PipelineError("bind the current prepared dispatch, not a stale attempt")
+    if employee.get("session_id") not in {None, session_id}:
+        raise common.PipelineError("employee already has a persistent session; continue it instead of replacing it")
+    if any(e.get("session_id") == session_id and e["employee_id"] != employee_id for e in _employees(root)):
+        raise common.PipelineError("session already belongs to another employee")
+    info = topify_opencode._get(f"/api/session/{session_id}").get("data", {})
+    if info.get("id") != session_id or info.get("agent") != ROLE_AGENTS[employee["role"]]:
+        raise common.PipelineError("actual session identity/agent does not match the employee role")
+    directory = info.get("location", {}).get("directory")
+    if directory is None or Path(directory).resolve() != Path(employee["job_root"]).resolve():
+        raise common.PipelineError("move the employee session into its exclusive job_root before binding")
+    receipt = {"employee_id": employee_id, "session_id": session_id,
+               "runtime_parent_id": info.get("parentID"), "dispatch_id": actual_dispatch,
+               "directory": directory, "bound_at": common.utc_now()}
+    _save_employee(root, {**employee, "session_id": session_id, "session_binding": receipt})
+    _append(root, "employee_session_bound", **receipt)
+    return receipt, 0
+
+
+@mutation
+def bind_seed(workspace, employee_id, seed_id, screen_receipt):
+    root, campaign = _root(workspace)
+    manifest = _load_manifest(root, campaign)
+    employee = _employee(root, employee_id)
+    if employee["role"] != "producer" or employee.get("employment_status") == "fired":
+        raise common.PipelineError("Seed binding needs a live producer")
+    if employee.get("seed_id") not in {None, seed_id} or employee.get("hardening_revision") is not None:
+        raise common.PipelineError("cannot silently change a producer's authored Seed")
+    topify_seed._safe_name(seed_id)
+    path, receipt = _json_file(screen_receipt, "Seed screen receipt")
+    if not path.is_relative_to(root) or receipt.get("seed_id") != seed_id:
+        raise common.PipelineError("Seed screen receipt must belong to this campaign and Seed")
+    if receipt.get("verdict") not in {"complete", "prototype-candidate"}:
+        raise common.PipelineError("Seed technical screen did not pass")
+    required = {"seed.source_identity", "seed.real_work", "seed.learning_loop", "seed.feasibility"}
+    passed = {row.get("id") for row in receipt.get("checks", []) if row.get("status") == "complete"}
+    if not required <= passed:
+        raise common.PipelineError("Seed technical checks are incomplete")
+    card, current_hash = topify_seed._current_seed(root, seed_id)
+    if receipt.get("seed_sha256") != current_hash:
+        raise common.PipelineError("Seed bytes changed since its technical screen")
+    if employee.get("replacement_of"):
+        former = _employee(root, employee["replacement_of"])
+        if former.get("seed_id") == seed_id:
+            raise common.PipelineError("replacement must use a new Seed")
+    claim = employee.get("dedup_claim")
+    if claim is None:
+        number, attempt = common.next_attempt(root / "supervision/seed-bindings" / employee_id)
+        card_path = attempt / "seed-card.json"
+        common.write_new_json(card_path, card)
+        claim, code = topify_dedup.claim(manifest["dedup_root"], card_path, employee_id,
+                                        campaign["config"]["campaign_id"], seed_id)
+        if code:
+            raise common.PipelineError("Seed dedup collision; request another Seed")
+    evidence = {"seed_id": seed_id, "seed_sha256": current_hash,
+                "screen_receipt": str(path), "screen_sha256": common.sha256_file(path)}
+    _save_employee(root, {**employee, "seed_id": seed_id, "dedup_claim": claim,
+                         "seed_binding": evidence, "phase": "authoring", "employment_status": "active"})
+    _append(root, "producer_seed_bound", employee_id=employee_id, **evidence)
+    return evidence, 0
+
+
+@mutation
 def report(workspace: str | Path, employee_id: str, report_file: str | Path) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     _load_manifest(root, campaign)
     employee = _employee(root, employee_id)
+    if employee.get("employment_status") == "fired":
+        raise common.PipelineError("a fired employee cannot resume itself with a report")
     path, value = _json_file(report_file, "employee report")
     status_value = value.get("status")
     if status_value not in REPORT_STATES:
@@ -750,6 +890,18 @@ def report(workspace: str | Path, employee_id: str, report_file: str | Path) -> 
     revision = value.get("revision_index", 0)
     if type(revision) is not int or revision not in {0, 1, 2}:
         raise common.PipelineError("producer revision_index must be 0, 1 or 2")
+    stage = value.get("stage", "candidate")
+    seed_proposal = employee["role"] == "producer" and stage == "seed-proposal"
+    candidate_complete = employee["role"] == "producer" and status_value == "completed" and not seed_proposal
+    if candidate_complete:
+        if not employee.get("seed_id") or not employee.get("dedup_claim"):
+            raise common.PipelineError("bind the producer's screened/reserved Seed before reporting a task")
+        previous = employee.get("hardening_revision")
+        if previous is None and revision != 0:
+            raise common.PipelineError("initial task completion must be r0, not r2")
+        if previous is not None and revision != previous:
+            if revision != previous + 1 or employee.get("requested_revision") != revision:
+                raise common.PipelineError("new revision needs the matching supervisor hardening challenge")
     number, attempt = common.next_attempt(root / "supervision/reports" / employee_id)
     receipt = {
         "schema_version": 1,
@@ -768,6 +920,7 @@ def report(workspace: str | Path, employee_id: str, report_file: str | Path) -> 
     else:
         state = {
             "completed": (
+                "awaiting-approval" if seed_proposal else
                 "hardening-r1-required" if employee.get("role") == "producer" and revision == 0
                 else "hardening-r2-required" if employee.get("role") == "producer" and revision == 1
                 else "awaiting-approval"
@@ -780,7 +933,8 @@ def report(workspace: str | Path, employee_id: str, report_file: str | Path) -> 
         **employee,
         "employment_status": state,
         "last_report": receipt,
-        **({"hardening_revision": revision} if employee.get("role") == "producer" else {}),
+        **({"hardening_revision": revision, "phase": "authoring" if revision < 2 else "qc-review"}
+           if candidate_complete else {"phase": "seed-review"} if seed_proposal else {}),
     })
     _append(root, "employee_reported", employee_id=employee_id, report_status=status_value,
             report_sha256=receipt["report_sha256"])
@@ -897,7 +1051,8 @@ def hardening_challenge(
     number, attempt = common.next_attempt(root / "supervision/decisions" / producer_id)
     challenge["attempt"] = number
     common.write_new_json(attempt / f"hardening-r{round_number}.json", challenge)
-    _save_employee(root, {**producer, "employment_status": "repair-required", "last_hardening_challenge": challenge})
+    _save_employee(root, {**producer, "employment_status": "repair-required", "last_hardening_challenge": challenge,
+                         "requested_revision": round_number})
     _append(root, "hardening_challenge_recorded", producer_id=producer_id,
             round=round_number, verdict=challenge["verdict"],
             challenge_sha256=challenge["challenge_sha256"])

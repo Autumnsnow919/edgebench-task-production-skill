@@ -66,6 +66,20 @@ class SupervisorContext:
         self._opencode_snapshot = {"status": "not-queried", "sessions": [], "active_count": 0}
         self.session_directory = Path(session_directory).resolve() if session_directory else self.root
 
+    def describe(self) -> dict:
+        campaign = common.load_json(self.root / "campaign.json")
+        lock_path = self.root / "requirements-profile-lock.json"
+        lock = common.load_json(lock_path) if lock_path.is_file() and not lock_path.is_symlink() else None
+        config = campaign.get("config", {})
+        return {
+            "campaign_id": config.get("campaign_id"),
+            "campaign_state": campaign.get("state"),
+            "target_task_count": config.get("target_task_count"),
+            "profile_id": lock.get("profile", {}).get("profile_id") if lock else None,
+            "delivery_format": lock.get("delivery", {}).get("format") if lock else None,
+            "lock_state": lock.get("state") if lock else "not-locked",
+        }
+
     def dashboard(self, employee_id: str | None = None) -> dict:
         value, _ = topify_supervisor.dashboard(self.root, employee_id)
         now = time.monotonic()
@@ -81,6 +95,7 @@ class SupervisorContext:
         return {
             "supervisor_id": self.supervisor_id,
             "benchmark": self.benchmark,
+            "workspace": self.describe(),
             "opencode_sessions": self._opencode_snapshot,
             **value,
         }
@@ -210,6 +225,7 @@ class ConsoleState:
                 "supervisor_id": context.supervisor_id,
                 "benchmark": context.benchmark,
                 "campaign": str(context.root),
+                "workspace": context.describe(),
             }
             for context in self.contexts.values()
         ]
@@ -344,6 +360,14 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     int(query.get("limit", [100])[0]),
                 )
                 self._respond(200, {"supervisor_id": context.supervisor_id, "messages": messages})
+                return
+            if parsed.path == "/api/opencode-session":
+                supervisor_id = self._query_supervisor_id()
+                auth = self._require(supervisor_id=supervisor_id)
+                context = self._context(auth, supervisor_id)
+                session_id = parse_qs(parsed.query).get("session_id", [""])[0]
+                result = topify_opencode.messages(context.session_directory, session_id)
+                self._respond(200, result)
                 return
             if parsed.path == "/api/stream":
                 self._stream()
@@ -491,6 +515,15 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     reply_to=body.get("reply_to"),
                 )
                 self._respond(201 if code == 0 else 409, result)
+                return
+            if parsed.path == "/api/opencode-message":
+                body = self._body()
+                auth = self._require(supervisor_id=body.get("supervisor_id"))
+                context = self._context(auth, body.get("supervisor_id"))
+                result = topify_opencode.send_message(
+                    context.session_directory, body["session_id"], body["text"]
+                )
+                self._respond(201, result)
                 return
             self._respond(404, {"error": "not found"})
         except PermissionError:

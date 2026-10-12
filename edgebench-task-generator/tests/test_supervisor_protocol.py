@@ -72,12 +72,24 @@ class SupervisorProtocolTests(unittest.TestCase):
             fingerprint_file=self.fingerprint,
         )
         request, code = topify_supervisor.child_request(
-            self.campaign, "producer-001", "producer-001-seed-01", "producer",
+            self.campaign, "producer-001", "producer-001-seed-01", "seed-worker",
             "verify pinned source", "orca-cli",
         )
         self.assertEqual(code, 0)
         self.assertEqual(request["status"], "pending-supervisor-dispatch")
         self.assertFalse((self.campaign / "supervision/employees/producer-001-seed-01.json").exists())
+
+    def test_producer_first_dispatch_can_start_without_a_preselected_seed(self):
+        producer, code = topify_supervisor.hire(
+            self.campaign, "producer-first", "producer", "opencode-task"
+        )
+        self.assertEqual(code, 0)
+        self.assertIsNone(producer["seed_id"])
+        self.assertTrue(Path(producer["prompt_path"]).is_file())
+        dispatch, code = topify_supervisor.dispatch(self.campaign, "producer-first")
+        self.assertEqual(code, 0)
+        self.assertEqual(dispatch["status"], "prepared")
+        self.assertEqual(dispatch["dispatch"]["hardening_revision"], 0)
 
     def test_early_upper_bound_is_not_infrastructure_failure(self):
         profile_path = Path(__file__).resolve().parents[1] / "references/profiles/edgebench-v1.json"

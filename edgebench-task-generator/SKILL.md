@@ -237,27 +237,30 @@ work (18), optimization (12), formal math (10), games/simulators (9). These
 are campaign planning targets for 100 tasks, not exact small-batch quotas.
 Do not relabel an optimization fixture to fill unrelated categories.
 
-```bash
-python3 edgebench-task-generator/scripts/topify_pipeline.py production-plan CAMPAIGN --verifiers 6 --authors 4
-python3 edgebench-task-generator/scripts/topify_pipeline.py production-dispatch CAMPAIGN --verifiers 6 --authors 4
-python3 edgebench-task-generator/scripts/topify_pipeline.py campaign-status CAMPAIGN
+The default batch loop is employee-first, not a standalone scout/author pool:
+
+```text
+campaign/profile lock
+→ employee-hire producer (one task)
+→ supervisor-dispatch producer
+→ producer discovers and pins its own Seed
+→ producer requests seed/prototype child Tasks when needed
+→ producer r0/r1/r2 → independent QC → freeze → rollout
 ```
 
-`production-plan` is read-only. `production-dispatch` signs immutable prompts;
-it does not launch another OpenCode session. Dispatch its named native Task
-subagents in this conversation, independently review mirrored bytes and process
-receipts, then `verifier-collect`/`author-collect` **every** job. A child cannot
-approve its Seed, quality or delivery. `production-tick --execute --notify-main`
-is only an owner-approved unattended fallback; it is not the interactive entry.
-In the configured campaign root, each job owns an exclusively created directory
-under `CAMPAIGN/agent-workspaces/<job-id>/`: authors create `task/` only there;
-verifiers stage a proposal and source evidence there. Dispatch hashes each
-prompt, and collect refuses changed prompt/job paths. The shared campaign is
-read-only for workers; the main agent serializes source mirroring and promotion.
-For any parallel scout/feasibility/reviewer job outside `production-dispatch`,
-first call `agent-workspace-reserve CAMPAIGN --job-id ROLE-UNIQUE-ID --role ROLE`
-and put that agent's tool working directory and output only in its returned
-`job_root`. A retry uses a new job ID; never reuse another agent's directory.
+The legacy `production-plan`/`production-dispatch` path signs short-lived
+verifier/author jobs and is not the default for a user request to create
+producers. Use it only when the owner explicitly requests source scouting,
+legacy worker dispatch or unattended recovery. A scout is never a producer and
+a source lead is never a completed task. Every producer and child worker gets
+an exclusive job_root; the main supervisor reviews actual receipts and keeps
+shared campaign writes serialized.
+
+At discovery, read `references/seed-sourcing.md`,
+`references/source-registry.md` and the applicable
+`references/domain-production.json` domain. The producer owns the discovery;
+the supervisor only accepts a receipt-backed Seed and dispatches bounded child
+help under that producer's tree.
 
 At discovery, read `references/seed-sourcing.md`, `references/source-registry.md`
 and the applicable `references/domain-production.json` domain. Capture actual

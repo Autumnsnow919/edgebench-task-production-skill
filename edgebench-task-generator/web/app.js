@@ -20,6 +20,7 @@
   let supervisors = [];
   let currentSupervisor = params.get('supervisor_id');
   let selected = null;
+  let selectedSession = null;
   let stream = null;
   let lastDashboard = null;
   let viewMode = 'cards';
@@ -84,7 +85,8 @@
       return;
     }
     $('session-summary').textContent = `${snapshot.active_count || 0} running · ${sessions.length} visible`;
-    $('session-grid').innerHTML = sessions.length ? sessions.map(session => `<article class="session-card ${session.status === 'running' ? 'running' : ''}"><i class="session-dot"></i><div><strong>${esc(session.title)}</strong><small>${esc(session.agent || 'agent')} · ${esc(session.session_id)}${session.parent_id ? ` · child of ${esc(session.parent_id)}` : ''}</small></div><span class="session-badge">${esc(session.status)}</span></article>`).join('') : '<div class="empty">No OpenCode sessions found for this workspace.</div>';
+    $('session-grid').innerHTML = sessions.length ? sessions.map(session => `<article class="session-card ${session.status === 'running' ? 'running' : ''} inspect-session" data-session-id="${esc(session.session_id)}"><i class="session-dot"></i><div><strong>${esc(session.title)}</strong><small>${esc(session.agent || 'agent')} · ${esc(session.session_id)}${session.parent_id ? ` · child of ${esc(session.parent_id)}` : ''}</small></div><span class="session-badge">${esc(session.status)}</span></article>`).join('') : '<div class="empty">No OpenCode sessions found for this workspace.</div>';
+    document.querySelectorAll('.inspect-session').forEach(card => card.addEventListener('click', () => showOpenCodeSession(card.dataset.sessionId)));
   }
   function renderAgentCard(employee) {
     const kind = statusKind(employee.status);
@@ -112,6 +114,10 @@
     const value = await api(`/api/messages?supervisor_id=${encodeURIComponent(currentSupervisor)}&target_type=${encodeURIComponent(targetType)}&target_id=${encodeURIComponent(targetId)}`);
     renderMessages(value.messages || [], 'detail-messages', 'No messages yet. Start a conversation with this agent.');
   }
+  async function loadSessionMessages(sessionId) {
+    const value = await api(`/api/opencode-session?supervisor_id=${encodeURIComponent(currentSupervisor)}&session_id=${encodeURIComponent(sessionId)}`);
+    renderMessages(value.messages || [], 'detail-messages', 'No OpenCode messages yet.');
+  }
   async function refresh() {
     try {
       if (!currentSupervisor) return;
@@ -133,15 +139,34 @@
     try {
       const value = await api(`/api/dashboard?supervisor_id=${encodeURIComponent(currentSupervisor)}&employee_id=${encodeURIComponent(id)}`);
       selected = value.employees?.[0]; if (!selected) return;
+      selectedSession = null;
       $('inspector').classList.remove('hidden'); $('inspector').setAttribute('aria-hidden', 'false');
       $('detail-title').textContent = selected.employee_id; $('detail-role').textContent = `${selected.role} · ${selected.transport || 'native'} · ${selected.task_id || selected.seed_id || 'unassigned'}`;
       $('detail-avatar').textContent = roleLetter(selected); $('detail-status').textContent = selected.status || 'unknown';
       $('detail-state').innerHTML = `<h3>Current state</h3><p><b>${esc(currentAction(selected))}</b></p><p class="muted-line">Parent: ${esc(selected.parent_id || 'supervisor')}<br>Job root: ${esc(selected.job_root || '—')}</p>`;
       $('detail-evidence').innerHTML = `<h3>Latest evidence</h3><p>QC: ${esc(selected.qc?.decision || '—')}<br>Rollout: ${esc(selected.rollout_gate?.status || '—')}<br>Report: ${esc(selected.report?.status || '—')}</p>`;
       $('detail-json').textContent = JSON.stringify(selected, null, 2); $('detail-log').textContent = selected.report?.summary || 'No worker summary has been reported yet.';
+      $('dispatch-worker').style.display = ''; $('fire-worker').style.display = '';
       await loadMessages('employee', selected.employee_id);
       document.querySelectorAll('.inspector-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === 'overview'));
       document.querySelectorAll('.inspector-body').forEach(body => body.classList.toggle('hidden', body.id !== 'detail-overview'));
+    } catch (error) { window.alert(error.message); }
+  }
+  async function showOpenCodeSession(sessionId) {
+    try {
+      const snapshot = lastDashboard?.opencode_sessions?.sessions?.find(item => item.session_id === sessionId);
+      if (!snapshot) return;
+      selected = null; selectedSession = snapshot;
+      $('inspector').classList.remove('hidden'); $('inspector').setAttribute('aria-hidden', 'false');
+      $('detail-title').textContent = snapshot.title; $('detail-role').textContent = `${snapshot.agent || 'agent'} · ${snapshot.session_id}`;
+      $('detail-avatar').textContent = 'O'; $('detail-status').textContent = snapshot.status || 'unknown';
+      $('detail-state').innerHTML = `<h3>OpenCode session</h3><p><b>${esc(snapshot.status || 'unknown')}</b></p><p class="muted-line">Parent: ${esc(snapshot.parent_id || 'root')}<br>Directory: ${esc(snapshot.directory || '—')}</p>`;
+      $('detail-evidence').innerHTML = `<h3>Runtime identity</h3><p>Agent: ${esc(snapshot.agent || '—')}<br>Session ID: ${esc(snapshot.session_id)}<br>Outcome: ${esc(snapshot.outcome || '—')}</p>`;
+      $('detail-json').textContent = JSON.stringify(snapshot, null, 2); $('detail-log').textContent = 'OpenCode session messages are shown in Chat.';
+      $('dispatch-worker').style.display = 'none'; $('fire-worker').style.display = 'none';
+      await loadSessionMessages(sessionId);
+      document.querySelectorAll('.inspector-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === 'chat'));
+      document.querySelectorAll('.inspector-body').forEach(body => body.classList.toggle('hidden', body.id !== 'detail-chat'));
     } catch (error) { window.alert(error.message); }
   }
   function switchSupervisor(id) { currentSupervisor = id; history.replaceState(null, '', `?supervisor_id=${encodeURIComponent(id)}`); renderWorkspaces(); $('inspector').classList.add('hidden'); if (stream) stream.close(); refresh(); connect(); }
@@ -166,7 +191,7 @@
   document.querySelectorAll('.view-switch').forEach(button => button.addEventListener('click', () => { viewMode = button.dataset.view; document.querySelectorAll('.view-switch').forEach(item => item.classList.toggle('active', item === button)); if (lastDashboard) renderDashboard(lastDashboard); }));
   $('filter-button').addEventListener('click', () => { filterMode = filterMode === 'all' ? 'attention' : filterMode === 'attention' ? 'active' : 'all'; $('filter-button').innerHTML = `Filter: ${filterMode[0].toUpperCase() + filterMode.slice(1)} <span>☷</span>`; if (lastDashboard) renderDashboard(lastDashboard); });
   $('activity-all').addEventListener('click', () => { activityExpanded = !activityExpanded; renderActivity(lastEvents); });
-  $('employee-chat-form').addEventListener('submit', async event => { event.preventDefault(); if (!selected) return; const input = $('employee-chat-input'); const text = input.value.trim(); if (!text) return; try { await api('/api/message', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, target_type: 'employee', target_id: selected.employee_id, text }) }); input.value = ''; await loadMessages('employee', selected.employee_id); } catch (error) { window.alert(error.message); } });
+  $('employee-chat-form').addEventListener('submit', async event => { event.preventDefault(); const input = $('employee-chat-input'); const text = input.value.trim(); if (!text) return; try { if (selectedSession) { await api('/api/opencode-message', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, session_id: selectedSession.session_id, text }) }); input.value = ''; await loadSessionMessages(selectedSession.session_id); } else if (selected) { await api('/api/message', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, target_type: 'employee', target_id: selected.employee_id, text }) }); input.value = ''; await loadMessages('employee', selected.employee_id); } } catch (error) { window.alert(error.message); } });
   window.setInterval(() => {
     if (selected && !$('inspector').classList.contains('hidden')) loadMessages('employee', selected.employee_id).catch(() => {});
     if (!$('command-modal').classList.contains('hidden') && currentSupervisor) api(`/api/messages?supervisor_id=${encodeURIComponent(currentSupervisor)}&target_type=supervisor&target_id=${encodeURIComponent(currentSupervisor)}`).then(value => renderMessages(value.messages || [], 'supervisor-messages', 'No supervisor messages yet.')).catch(() => {});
