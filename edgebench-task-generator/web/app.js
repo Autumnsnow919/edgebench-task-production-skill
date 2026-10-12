@@ -65,6 +65,7 @@
     $('workspace-heading').textContent = `${value.benchmark || 'Your'} agents at work.`;
     $('workspace-subtitle').textContent = `${employees.length} employees · live task state · profile-bound evidence`;
     $('side-status').textContent = `${employees.length} visible employees`;
+    renderSessions(value.opencode_sessions || {});
     const visibleEmployees = filterMode === 'attention'
       ? employees.filter(employee => ['needs-owner-decision', 'repair-required', 'replacement-required', 'fired'].includes(employee.status) || employee.rollout_gate?.status === 'EARLY_TOO_EASY')
       : filterMode === 'active'
@@ -74,6 +75,16 @@
     $('agent-grid').innerHTML = visibleEmployees.length ? visibleEmployees.map(renderAgentCard).join('') : '<div class="empty">No agents match this view.</div>';
     document.querySelectorAll('.inspect-agent').forEach(button => button.addEventListener('click', () => showInspector(button.dataset.id)));
     renderAlerts(value.alerts || []);
+  }
+  function renderSessions(snapshot) {
+    const sessions = snapshot.sessions || [];
+    if (snapshot.status === 'unavailable') {
+      $('session-summary').textContent = 'OpenCode unavailable';
+      $('session-grid').innerHTML = `<div class="empty">OpenCode session adapter unavailable: ${esc(snapshot.reason || 'unknown error')}</div>`;
+      return;
+    }
+    $('session-summary').textContent = `${snapshot.active_count || 0} running · ${sessions.length} visible`;
+    $('session-grid').innerHTML = sessions.length ? sessions.map(session => `<article class="session-card ${session.status === 'running' ? 'running' : ''}"><i class="session-dot"></i><div><strong>${esc(session.title)}</strong><small>${esc(session.agent || 'agent')} · ${esc(session.session_id)}${session.parent_id ? ` · child of ${esc(session.parent_id)}` : ''}</small></div><span class="session-badge">${esc(session.status)}</span></article>`).join('') : '<div class="empty">No OpenCode sessions found for this workspace.</div>';
   }
   function renderAgentCard(employee) {
     const kind = statusKind(employee.status);

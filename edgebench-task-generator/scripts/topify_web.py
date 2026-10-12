@@ -19,6 +19,7 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 import topify_common as common
+import topify_opencode
 import topify_registry
 import topify_seed
 import topify_supervisor
@@ -54,16 +55,35 @@ def _read_token_file(value: str | Path | None, label: str) -> str | None:
 
 
 class SupervisorContext:
-    def __init__(self, supervisor_id: str, benchmark: str, campaign: str | Path):
+    def __init__(self, supervisor_id: str, benchmark: str, campaign: str | Path,
+                 session_directory: str | Path | None = None):
         self.supervisor_id = supervisor_id
         self.benchmark = benchmark
         self.root, self.campaign = topify_seed.load_campaign(campaign)
         if not (self.root / "supervision/manifest.json").is_file():
             raise common.PipelineError(f"run supervisor-init before adding {supervisor_id}")
+        self._opencode_at = 0.0
+        self._opencode_snapshot = {"status": "not-queried", "sessions": [], "active_count": 0}
+        self.session_directory = Path(session_directory).resolve() if session_directory else self.root
 
     def dashboard(self, employee_id: str | None = None) -> dict:
         value, _ = topify_supervisor.dashboard(self.root, employee_id)
-        return {"supervisor_id": self.supervisor_id, "benchmark": self.benchmark, **value}
+        now = time.monotonic()
+        if now - self._opencode_at >= 3:
+            try:
+                self._opencode_snapshot = topify_opencode.sessions(self.session_directory)
+            except (common.PipelineError, OSError, ValueError, TypeError) as exc:
+                self._opencode_snapshot = {
+                    "status": "unavailable", "reason": str(exc),
+                    "sessions": [], "active_count": 0,
+                }
+            self._opencode_at = now
+        return {
+            "supervisor_id": self.supervisor_id,
+            "benchmark": self.benchmark,
+            "opencode_sessions": self._opencode_snapshot,
+            **value,
+        }
 
 
 class ConsoleState:
@@ -100,7 +120,10 @@ class ConsoleState:
             for item in registry["supervisors"]:
                 token = (_read_token_file(item.get("supervisor_token_file"), f"{item['supervisor_id']} supervisor token")
                          if self.auth_enabled else None)
-                context = SupervisorContext(item["supervisor_id"], item["benchmark"], item["campaign"])
+                context = SupervisorContext(
+                    item["supervisor_id"], item["benchmark"], item["campaign"],
+                    self.scan_roots[0] if self.scan_roots else None,
+                )
                 self.contexts[context.supervisor_id] = context
                 if token is not None:
                     self.tokens[_token_hash(token)] = ("supervisor", context.supervisor_id)
@@ -152,7 +175,8 @@ class ConsoleState:
                         refreshed[item["supervisor_id"]] = existing
                     else:
                         refreshed[item["supervisor_id"]] = SupervisorContext(
-                            item["supervisor_id"], item["benchmark"], item["campaign"]
+                            item["supervisor_id"], item["benchmark"], item["campaign"],
+                            self.scan_roots[0] if self.scan_roots else None,
                         )
                 self.contexts = refreshed
                 self.dedup_root = registry.get("dedup_root")
