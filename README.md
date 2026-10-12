@@ -36,6 +36,10 @@ For a reusable chat-first launch work order across Benchmarks, read
 OpenCode/Orca supervisor to execute it; writing or reading the template alone
 does not start production.
 
+For a human-facing explanation of roles, Web monitoring, approvals, hardening,
+QC, rollout and replacement, read
+[`批量量产使用指南.md`](批量量产使用指南.md).
+
 Use the Skill in the current OpenCode session. The session finds and verifies a
 Seed before authoring a task:
 
