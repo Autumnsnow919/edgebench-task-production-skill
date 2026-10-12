@@ -39,7 +39,7 @@
         </section>
 
         <section class="metric-row">
-          <div class="metric"><span>Active agents</span><strong id="active">—</strong><small id="active-note">across this workspace</small></div>
+          <div class="metric"><span>Verified running employees</span><strong id="active">—</strong><small id="active-note">waiting for runtime verification</small></div>
           <div class="metric"><span>Available capacity</span><strong id="capacity">—</strong><small>ready to dispatch</small></div>
           <div class="metric"><span>Needs attention</span><strong id="alert-count">—</strong><small id="alert-note">no active alerts</small></div>
           <div class="metric accent-metric"><span>System health</span><strong id="health">Good</strong><small>ledger and stream online</small></div>
@@ -47,7 +47,8 @@
 
         <section class="session-panel panel-surface"><div class="panel-title"><div><p class="overline">OPENCODE RUNTIME</p><h2>Live sessions</h2></div><span id="session-summary" class="hint">Detecting…</span></div><div id="session-grid" class="session-grid"></div></section>
 
-        <section class="section-head"><div><p class="overline">WORKFORCE</p><h2>What your agents are doing</h2></div><div class="view-actions"><button class="view-switch active" data-view="cards">Cards</button><button class="view-switch" data-view="timeline">Timeline</button><button id="filter-button" class="filter-button">Filter: All <span>☷</span></button></div></section>
+        <section class="section-head"><div><p class="overline">WORKFORCE · TASK OWNERS</p><h2>本批次出题负责人</h2></div><div class="view-actions"><button class="view-switch active" data-view="cards">Cards</button><button class="view-switch" data-view="timeline">Timeline</button><button id="filter-button" class="filter-button">Filter: All <span>☷</span></button></div></section>
+        <p id="workforce-summary" class="workforce-summary">按题展示负责人、实际会话和验收阶段；不会把临时 Scout 当作出题员工。</p>
         <section id="agent-grid" class="agent-grid"></section>
 
         <section class="lower-grid">
@@ -65,7 +66,7 @@
       <div class="inspector-heading"><div id="detail-avatar" class="agent-avatar large">P</div><div><h2 id="detail-title">—</h2><p id="detail-role">—</p></div><span id="detail-status" class="status-chip">—</span></div>
       <div class="inspector-tabs"><button class="inspector-tab active" data-tab="overview">Overview</button><button class="inspector-tab" data-tab="chat">Chat</button><button class="inspector-tab" data-tab="activity">Activity</button><button class="inspector-tab" data-tab="evidence">Evidence</button></div>
       <div id="detail-overview" class="inspector-body"><div id="detail-state" class="detail-block"></div><div id="detail-evidence" class="detail-block"></div></div>
-      <div id="detail-chat" class="inspector-body hidden"><div id="detail-messages" class="message-list"></div><form id="employee-chat-form" class="chat-form"><textarea id="employee-chat-input" placeholder="与这个下属直接沟通…"></textarea><button class="action-button primary" type="submit">Send</button></form></div>
+      <div id="detail-chat" class="inspector-body hidden"><p id="employee-chat-status" class="form-hint"></p><div id="detail-messages" class="message-list"></div><form id="employee-chat-form" class="chat-form"><textarea id="employee-chat-input" placeholder="与这个下属直接沟通…"></textarea><button id="employee-chat-send" class="action-button primary" type="submit">Send</button></form></div>
       <div id="detail-activity" class="inspector-body hidden"><pre id="detail-log" class="log-view"></pre></div>
       <div id="detail-evidence-tab" class="inspector-body hidden"><pre id="detail-json" class="json-view"></pre></div>
       <div class="inspector-actions"><button id="dispatch-worker" class="action-button primary">Prepare dispatch</button><button id="fire-worker" class="action-button danger">Fire agent tree</button></div>
@@ -73,6 +74,6 @@
   </div>
 
   <div id="command-modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><div><p class="overline">SUPERVISOR CHAT</p><h2>Talk to the supervisor</h2></div><button id="command-close" class="close-button">×</button></div><p class="modal-copy">This is a persistent owner conversation with the selected supervisor. Every message is auditable.</p><div id="supervisor-messages" class="message-list modal-messages"></div><form id="command-form"><textarea id="command-input" placeholder="例如：为 EdgeBench 派发 10 个 producer，优先 systems/software"></textarea><div class="modal-actions"><span id="command-result" class="form-hint">Owner messages are queued for the supervisor.</span><button class="action-button primary" type="submit">Send message</button></div></form></div></div>
-  <script src="/app.js?v=workspace-20261012-2"></script>
+  <script src="/app.js?v=workforce-session-link-20261012"></script>
 </body>
 </html>

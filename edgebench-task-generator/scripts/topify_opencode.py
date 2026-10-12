@@ -111,11 +111,48 @@ def sessions(directory: str | Path, limit: int = 200) -> dict:
 def _visible_session(directory: str | Path, session_id: str) -> dict:
     if not isinstance(session_id, str) or SESSION_ID.fullmatch(session_id) is None:
         raise common.PipelineError("invalid OpenCode session ID")
-    value = sessions(directory, limit=300)
-    item = next((item for item in value["sessions"] if item["session_id"] == session_id), None)
-    if item is None:
+    root = Path(directory).resolve(strict=True)
+    item = _get(f"/api/session/{session_id}").get("data", {})
+    location = item.get("location", {}) if isinstance(item, dict) else {}
+    session_directory = location.get("directory")
+    if (item.get("id") != session_id or not isinstance(session_directory, str)
+            or not Path(session_directory).resolve().is_relative_to(root)):
         raise common.PipelineError("OpenCode session is not visible under the approved scan root")
-    return item
+    return {
+        "session_id": session_id, "title": item.get("title") or "Untitled session",
+        "agent": item.get("agent"), "parent_id": item.get("parentID"),
+        "directory": session_directory, "model": item.get("model"),
+        "created_at": item.get("time", {}).get("created"),
+        "updated_at": item.get("time", {}).get("updated"), "outcome": item.get("outcome"),
+    }
+
+
+def employee_runtime(employee: dict, active: dict | None = None) -> dict:
+    """Verify a ledger binding; never associate employees by title or proximity."""
+    session_id = employee.get("session_id")
+    if not session_id:
+        return {"status": "unbound", "session_id": None,
+                "reason": "Only a work order exists. The supervisor must start and bind the actual employee session.",
+                "can_chat": False}
+    if employee.get("transport") != "opencode-task":
+        return {"status": "unsupported", "session_id": session_id,
+                "reason": "This transport has no verified runtime adapter.", "can_chat": False}
+    try:
+        job_root = Path(employee["job_root"]).resolve(strict=True)
+        info = _visible_session(job_root, session_id)
+        if Path(info["directory"]).resolve() != job_root:
+            return {"status": "binding-mismatch", "session_id": session_id,
+                    "reason": "Actual session directory differs from the exclusive employee job_root.",
+                    "can_chat": False}
+        if active is None:
+            active = _get("/api/session/active").get("data", {})
+        return {**info, "status": "running" if session_id in active else "idle",
+                "can_chat": employee.get("status", employee.get("employment_status")) != "fired",
+                "source": "opencode-api"}
+    except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+        return {"status": "unavailable", "session_id": session_id,
+                "reason": "The bound session could not be verified; no runtime activity is assumed.",
+                "can_chat": False}
 
 
 def messages(directory: str | Path, session_id: str, limit: int = 100) -> dict:

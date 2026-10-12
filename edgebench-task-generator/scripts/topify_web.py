@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import secrets
 import stat
+import subprocess
 import threading
 import time
 from urllib.parse import parse_qs, urlparse
@@ -64,6 +65,8 @@ class SupervisorContext:
             raise common.PipelineError(f"run supervisor-init before adding {supervisor_id}")
         self._opencode_at = 0.0
         self._opencode_snapshot = {"status": "not-queried", "sessions": [], "active_count": 0}
+        self._employee_runtime_cache = {}
+        self._runtime_lock = threading.Lock()
         self.session_directory = Path(session_directory).resolve() if session_directory else self.root
 
     def describe(self) -> dict:
@@ -83,6 +86,26 @@ class SupervisorContext:
     def dashboard(self, employee_id: str | None = None) -> dict:
         value, _ = topify_supervisor.dashboard(self.root, employee_id)
         now = time.monotonic()
+        with self._runtime_lock:
+            active = None
+            for employee in value["employees"]:
+                key = (employee["employee_id"], employee.get("session_id"), employee["job_root"], employee["status"])
+                cached = self._employee_runtime_cache.get(key)
+                if cached is None or now - cached[0] >= 5:
+                    if employee.get("session_id") and active is None:
+                        try:
+                            active = topify_opencode._get("/api/session/active").get("data", {})
+                        except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+                            active = None
+                    runtime = topify_opencode.employee_runtime(employee, active)
+                    self._employee_runtime_cache[key] = (now, runtime)
+                employee["runtime"] = self._employee_runtime_cache[key][1]
+        value["workforce"] = {
+            "registered": len(value["employees"]),
+            "runtime_running": sum(e["runtime"]["status"] == "running" for e in value["employees"]),
+            "unbound": sum(e["runtime"]["status"] == "unbound" for e in value["employees"]),
+            "production_started": any(e["role"] == "producer" and e["runtime"]["status"] == "running" for e in value["employees"]),
+        }
         if now - self._opencode_at >= 3:
             try:
                 self._opencode_snapshot = topify_opencode.sessions(self.session_directory)
@@ -369,6 +392,19 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 result = topify_opencode.messages(context.session_directory, session_id)
                 self._respond(200, result)
                 return
+            if parsed.path == "/api/employee-session":
+                supervisor_id = self._query_supervisor_id()
+                auth = self._require(supervisor_id=supervisor_id)
+                context = self._context(auth, supervisor_id)
+                employee_id = parse_qs(parsed.query).get("employee_id", [""])[0]
+                employee = topify_supervisor._employee(context.root, employee_id)
+                runtime = topify_opencode.employee_runtime(employee)
+                if runtime["status"] not in {"running", "idle"}:
+                    self._respond(409, {"error": runtime.get("reason"), "runtime": runtime})
+                    return
+                result = topify_opencode.messages(employee["job_root"], employee["session_id"])
+                self._respond(200, {**result, "employee_id": employee_id, "runtime": runtime})
+                return
             if parsed.path == "/api/stream":
                 self._stream()
                 return
@@ -523,6 +559,20 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 result = topify_opencode.send_message(
                     context.session_directory, body["session_id"], body["text"]
                 )
+                self._respond(201, result)
+                return
+            if parsed.path == "/api/employee-session-message":
+                body = self._body()
+                auth = self._require(supervisor_id=body.get("supervisor_id"))
+                context = self._context(auth, body.get("supervisor_id"))
+                employee = topify_supervisor._employee(context.root, body["employee_id"])
+                runtime = topify_opencode.employee_runtime(employee)
+                if not runtime["can_chat"]:
+                    self._respond(409, {"error": runtime.get("reason", "Employee is not available for chat"), "runtime": runtime})
+                    return
+                result = topify_opencode.send_message(employee["job_root"], employee["session_id"], body["text"])
+                topify_supervisor._append(context.root, "employee_session_message_sent",
+                                         employee_id=employee["employee_id"], session_id=employee["session_id"])
                 self._respond(201, result)
                 return
             self._respond(404, {"error": "not found"})

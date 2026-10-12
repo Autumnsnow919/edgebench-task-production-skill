@@ -45,6 +45,13 @@ button { cursor: pointer; }
 @media (max-width: 940px) { .sidebar { width: 78px; flex-basis: 78px; padding-left: 10px; padding-right: 10px; }.brand { padding-left: 13px; }.brand div:last-child, .side-label, .workspace-item div, .sidebar-bottom { display: none; }.workspace-item { justify-content: center; padding: 10px; }.content, .topbar { padding-left: 24px; padding-right: 24px; }.lower-grid { grid-template-columns: 1fr; } }
 
 /* Workspace boundary: long campaign IDs must never paint into the main stage. */
+.workforce-summary { color: var(--muted); margin: 0 0 16px; font-size: 12px; }
+.workforce-summary.warning { color: var(--orange); padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--white); }
+.task-stages { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+.task-stage { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 10px; }
+.task-stage.recorded { color: var(--green); border-color: #78c497; }
+.employee-session-link { display: inline-block; padding: 8px 0; color: var(--green); background: transparent; border: 0; font-size: 12px; }
+button:disabled { cursor: not-allowed; opacity: .55; }
 .sidebar { min-width: 0; overflow-x: hidden; overflow-y: auto; }
 .workspace-list { width: 100%; min-width: 0; overflow: hidden; }
 .workspace-item { width: 100%; min-width: 0; max-width: 100%; overflow: hidden; }

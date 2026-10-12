@@ -34,15 +34,18 @@
     if (['fired', 'failed'].includes(status)) return 'bad';
     return 'good';
   }
-  function progress(employee) {
-    const state = employee.status || '';
-    if (state === 'running' || state === 'rollout-running') return 62;
-    if (state === 'awaiting-approval' || state === 'rollout-pending') return 78;
-    if (state === 'needs-owner-decision' || state === 'repair-required') return 54;
-    if (state === 'complete') return 100;
-    return 31;
+  function stageMarkup(employee) {
+    const revision = employee.hardening_revision;
+    const stages = [['Seed', Boolean(employee.seed_id)],
+      ['r0', Number.isInteger(revision) && revision >= 0],
+      ['r1', Number.isInteger(revision) && revision >= 1],
+      ['r2', Number.isInteger(revision) && revision >= 2],
+      ['QC', employee.qc?.decision === 'pass'], ['Rollout', Boolean(employee.rollout_gate)]];
+    return `<div class="task-stages">${stages.map(([label, recorded]) => `<span class="task-stage ${recorded ? 'recorded' : ''}">${label}</span>`).join('')}</div>`;
   }
   function currentAction(employee) {
+    if (employee.runtime?.status === 'unbound') return '尚未启动/绑定真实会话；目前只有工作单';
+    if (employee.runtime?.status === 'binding-mismatch') return '会话绑定目录不匹配；不能操纵该会话';
     if (employee.report?.summary) return employee.report.summary;
     if (employee.rollout_gate?.status) return `${employee.rollout_gate.status} · ${employee.rollout_gate.action || ''}`;
     if (employee.qc?.decision) return `QC-${employee.qc.round || '?'} · ${employee.qc.decision}`;
@@ -56,7 +59,13 @@
     lastDashboard = value;
     const employees = value.employees || [];
     const capacity = value.capacity || {};
-    $('active').textContent = capacity.active ?? employees.filter(x => !['fired', 'complete'].includes(x.status)).length;
+    const workforce = value.workforce || {};
+    $('active').textContent = workforce.runtime_running ?? '—';
+    $('active-note').textContent = `${employees.length} registered · ${workforce.unbound ?? '—'} unbound`;
+    $('workforce-summary').textContent = employees.length
+      ? `已登记 ${employees.length} 名员工，实际运行 ${workforce.runtime_running ?? '未知'} 名，未绑定 ${workforce.unbound ?? '未知'} 名。绑定后可直接打开该员工的真实会话；阶段来自本批次回执。`
+      : '本批次没有登记出题员工。上方 Live sessions 是真实 OpenCode 运行时，不是本批次的员工名单。';
+    $('workforce-summary').classList.toggle('warning', Boolean(workforce.unbound));
     $('capacity').textContent = `${capacity.available ?? '—'} / ${capacity.max_concurrent ?? '—'}`;
     $('alert-count').textContent = value.alerts?.length ?? 0;
     $('alert-note').textContent = value.alerts?.length ? 'owner decision required' : 'no active alerts';
@@ -94,8 +103,8 @@
     const report = employee.report || {};
     return `<article class="agent-card" style="--card-tint:${kind === 'bad' ? '#fbe7e5' : kind === 'warn' ? '#fff0d9' : '#e3f3e9'}">
       <div class="card-top"><div class="agent-identity"><span class="agent-avatar">${roleLetter(employee)}</span><div><strong>${esc(employee.employee_id)}</strong><small>${esc(employee.role)} · ${esc(employee.transport || 'native')}</small></div></div><span class="card-status ${kind}"><i></i>${esc(employee.status || 'unknown')}</span></div>
-      <div class="card-body"><div class="card-action">Now <b>${esc(currentAction(employee))}</b></div><div class="card-progress"><span style="width:${progress(employee)}%"></span></div></div>
-      <div class="card-footer"><span>${esc(employee.task_id || employee.seed_id || 'No task assigned')}</span><button class="inspect-agent" data-id="${esc(employee.employee_id)}">Open inspector →</button></div>
+      <div class="card-body"><div class="card-action">Now <b>${esc(currentAction(employee))}</b></div><small>Phase: ${esc(employee.phase || '未报告')} · Runtime: ${esc(employee.runtime?.status || '未知')}</small>${stageMarkup(employee)}</div>
+      <div class="card-footer"><span>${esc(employee.session_id || employee.task_id || employee.seed_id || employee.phase || 'No task assigned')}</span><button class="inspect-agent" data-id="${esc(employee.employee_id)}">Open inspector →</button></div>
     </article>`;
   }
   function renderAlerts(alerts) {
@@ -119,6 +128,13 @@
     const value = await api(`/api/opencode-session?supervisor_id=${encodeURIComponent(currentSupervisor)}&session_id=${encodeURIComponent(sessionId)}`);
     renderMessages(value.messages || [], 'detail-messages', 'No OpenCode messages yet.');
   }
+  async function loadEmployeeSession(employeeId) {
+    const scope = currentSupervisor;
+    const value = await api(`/api/employee-session?supervisor_id=${encodeURIComponent(scope)}&employee_id=${encodeURIComponent(employeeId)}`);
+    if (scope !== currentSupervisor || selected?.employee_id !== employeeId) return;
+    renderMessages(value.messages || [], 'detail-messages', 'No messages in the bound employee session yet.');
+    $('employee-chat-status').textContent = `真实会话：${value.session_id} · ${value.status}`;
+  }
   async function refresh() {
     try {
       if (!currentSupervisor) return;
@@ -133,7 +149,12 @@
   async function loadSupervisors() {
     const value = await api('/api/supervisors');
     supervisors = value.supervisors || [];
-    if (!currentSupervisor || !supervisors.some(item => item.supervisor_id === currentSupervisor)) currentSupervisor = supervisors[0]?.supervisor_id;
+    if (!currentSupervisor || !supervisors.some(item => item.supervisor_id === currentSupervisor)) {
+      const preferred = supervisors.find(item => item.workspace?.lock_state === 'REQUIREMENTS_LOCKED')
+        || supervisors.find(item => item.workspace?.profile_id)
+        || supervisors[0];
+      currentSupervisor = preferred?.supervisor_id;
+    }
     renderWorkspaces();
   }
   async function showInspector(id) {
@@ -144,11 +165,16 @@
       $('inspector').classList.remove('hidden'); $('inspector').setAttribute('aria-hidden', 'false');
       $('detail-title').textContent = selected.employee_id; $('detail-role').textContent = `${selected.role} · ${selected.transport || 'native'} · ${selected.task_id || selected.seed_id || 'unassigned'}`;
       $('detail-avatar').textContent = roleLetter(selected); $('detail-status').textContent = selected.status || 'unknown';
-      $('detail-state').innerHTML = `<h3>Current state</h3><p><b>${esc(currentAction(selected))}</b></p><p class="muted-line">Parent: ${esc(selected.parent_id || 'supervisor')}<br>Job root: ${esc(selected.job_root || '—')}</p>`;
+      $('detail-state').innerHTML = `<h3>Current state</h3><p><b>${esc(currentAction(selected))}</b></p><p class="muted-line">Phase: ${esc(selected.phase || '未报告')}<br>Hardening: ${esc(selected.hardening_revision ?? '未报告')}<br>Session: ${esc(selected.session_id || '未绑定')}<br>Runtime: ${esc(selected.runtime?.status || '未知')}<br>Parent: ${esc(selected.parent_id || 'supervisor')}<br>Job root: ${esc(selected.job_root || '—')}</p>${stageMarkup(selected)}`;
       $('detail-evidence').innerHTML = `<h3>Latest evidence</h3><p>QC: ${esc(selected.qc?.decision || '—')}<br>Rollout: ${esc(selected.rollout_gate?.status || '—')}<br>Report: ${esc(selected.report?.status || '—')}</p>`;
       $('detail-json').textContent = JSON.stringify(selected, null, 2); $('detail-log').textContent = selected.report?.summary || 'No worker summary has been reported yet.';
       $('dispatch-worker').style.display = ''; $('fire-worker').style.display = '';
-      await loadMessages('employee', selected.employee_id);
+      const canChat = Boolean(selected.runtime?.can_chat);
+      $('employee-chat-input').disabled = !canChat;
+      $('employee-chat-send').disabled = !canChat;
+      $('employee-chat-status').textContent = canChat ? '消息将发送到这名员工绑定的真实 OpenCode 会话。' : (selected.runtime?.reason || '未验证会话，无法直接聊天。');
+      $('detail-messages').textContent = '';
+      if (canChat) await loadEmployeeSession(selected.employee_id);
       document.querySelectorAll('.inspector-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === 'overview'));
       document.querySelectorAll('.inspector-body').forEach(body => body.classList.toggle('hidden', body.id !== 'detail-overview'));
     } catch (error) { window.alert(error.message); }
@@ -158,6 +184,8 @@
       const snapshot = lastDashboard?.opencode_sessions?.sessions?.find(item => item.session_id === sessionId);
       if (!snapshot) return;
       selected = null; selectedSession = snapshot;
+      $('employee-chat-input').disabled = false; $('employee-chat-send').disabled = false;
+      $('employee-chat-status').textContent = '真实 OpenCode 会话；发送会唤起该会话。';
       $('inspector').classList.remove('hidden'); $('inspector').setAttribute('aria-hidden', 'false');
       $('detail-title').textContent = snapshot.title; $('detail-role').textContent = `${snapshot.agent || 'agent'} · ${snapshot.session_id}`;
       $('detail-avatar').textContent = 'O'; $('detail-status').textContent = snapshot.status || 'unknown';
@@ -170,7 +198,7 @@
       document.querySelectorAll('.inspector-body').forEach(body => body.classList.toggle('hidden', body.id !== 'detail-chat'));
     } catch (error) { window.alert(error.message); }
   }
-  async function switchSupervisor(id) { if (!id || id === currentSupervisor) return; currentSupervisor = id; history.replaceState(null, '', `?supervisor_id=${encodeURIComponent(id)}`); renderWorkspaces(); $('inspector').classList.add('hidden'); if (stream) stream.close(); $('connection').textContent = 'Loading workspace…'; await refresh(); connect(); }
+  async function switchSupervisor(id) { if (!id || id === currentSupervisor) return; currentSupervisor = id; selected = null; selectedSession = null; history.replaceState(null, '', `?supervisor_id=${encodeURIComponent(id)}`); renderWorkspaces(); $('inspector').classList.add('hidden'); if (stream) stream.close(); $('connection').textContent = 'Loading workspace…'; await refresh(); connect(); }
   function connect() {
     if (!currentSupervisor) return;
     const query = new URLSearchParams({ supervisor_id: currentSupervisor });
@@ -192,9 +220,10 @@
   document.querySelectorAll('.view-switch').forEach(button => button.addEventListener('click', () => { viewMode = button.dataset.view; document.querySelectorAll('.view-switch').forEach(item => item.classList.toggle('active', item === button)); if (lastDashboard) renderDashboard(lastDashboard); }));
   $('filter-button').addEventListener('click', () => { filterMode = filterMode === 'all' ? 'attention' : filterMode === 'attention' ? 'active' : 'all'; $('filter-button').innerHTML = `Filter: ${filterMode[0].toUpperCase() + filterMode.slice(1)} <span>☷</span>`; if (lastDashboard) renderDashboard(lastDashboard); });
   $('activity-all').addEventListener('click', () => { activityExpanded = !activityExpanded; renderActivity(lastEvents); });
-  $('employee-chat-form').addEventListener('submit', async event => { event.preventDefault(); const input = $('employee-chat-input'); const text = input.value.trim(); if (!text) return; try { if (selectedSession) { await api('/api/opencode-message', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, session_id: selectedSession.session_id, text }) }); input.value = ''; await loadSessionMessages(selectedSession.session_id); } else if (selected) { await api('/api/message', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, target_type: 'employee', target_id: selected.employee_id, text }) }); input.value = ''; await loadMessages('employee', selected.employee_id); } } catch (error) { window.alert(error.message); } });
+  $('employee-chat-form').addEventListener('submit', async event => { event.preventDefault(); const input = $('employee-chat-input'); const text = input.value.trim(); if (!text) return; try { if (selectedSession) { await api('/api/opencode-message', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, session_id: selectedSession.session_id, text }) }); input.value = ''; await loadSessionMessages(selectedSession.session_id); } else if (selected?.runtime?.can_chat) { await api('/api/employee-session-message', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, employee_id: selected.employee_id, text }) }); input.value = ''; await loadEmployeeSession(selected.employee_id); } } catch (error) { window.alert(error.message); } });
   window.setInterval(() => {
-    if (selected && !$('inspector').classList.contains('hidden')) loadMessages('employee', selected.employee_id).catch(() => {});
+    if (selected?.runtime?.can_chat && !$('inspector').classList.contains('hidden')) loadEmployeeSession(selected.employee_id).catch(error => { $('employee-chat-status').textContent = error.message; });
+    if (selectedSession && !$('inspector').classList.contains('hidden')) loadSessionMessages(selectedSession.session_id).catch(error => { $('employee-chat-status').textContent = error.message; });
     if (!$('command-modal').classList.contains('hidden') && currentSupervisor) api(`/api/messages?supervisor_id=${encodeURIComponent(currentSupervisor)}&target_type=supervisor&target_id=${encodeURIComponent(currentSupervisor)}`).then(value => renderMessages(value.messages || [], 'supervisor-messages', 'No supervisor messages yet.')).catch(() => {});
   }, 3000);
   $('dispatch-worker').addEventListener('click', async () => { if (!selected) return; try { await api('/api/dispatch', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, employee_id: selected.employee_id }) }); await refresh(); await showInspector(selected.employee_id); } catch (error) { window.alert(error.message); } });
