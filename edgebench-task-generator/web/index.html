@@ -45,7 +45,7 @@
           <div class="metric accent-metric"><span>System health</span><strong id="health">Good</strong><small>ledger and stream online</small></div>
         </section>
 
-        <section class="section-head"><div><p class="overline">WORKFORCE</p><h2>What your agents are doing</h2></div><div class="view-actions"><button class="view-switch active">Cards</button><button class="view-switch">Timeline</button><button id="filter-button" class="filter-button">Filter <span>☷</span></button></div></section>
+        <section class="section-head"><div><p class="overline">WORKFORCE</p><h2>What your agents are doing</h2></div><div class="view-actions"><button class="view-switch active" data-view="cards">Cards</button><button class="view-switch" data-view="timeline">Timeline</button><button id="filter-button" class="filter-button">Filter: All <span>☷</span></button></div></section>
         <section id="agent-grid" class="agent-grid"></section>
 
         <section class="lower-grid">
@@ -66,7 +66,7 @@
       <div id="detail-chat" class="inspector-body hidden"><div id="detail-messages" class="message-list"></div><form id="employee-chat-form" class="chat-form"><textarea id="employee-chat-input" placeholder="与这个下属直接沟通…"></textarea><button class="action-button primary" type="submit">Send</button></form></div>
       <div id="detail-activity" class="inspector-body hidden"><pre id="detail-log" class="log-view"></pre></div>
       <div id="detail-evidence-tab" class="inspector-body hidden"><pre id="detail-json" class="json-view"></pre></div>
-      <div class="inspector-actions"><button id="dispatch-worker" class="action-button primary">Dispatch / continue</button><button id="fire-worker" class="action-button danger">Fire agent tree</button></div>
+      <div class="inspector-actions"><button id="dispatch-worker" class="action-button primary">Prepare dispatch</button><button id="fire-worker" class="action-button danger">Fire agent tree</button></div>
     </aside>
   </div>
 

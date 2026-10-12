@@ -54,8 +54,9 @@ class SupervisorProtocolTests(unittest.TestCase):
         self.assertEqual(producer["employment_status"], "active")
         dispatch, code = topify_supervisor.dispatch(self.campaign, "producer-001")
         self.assertEqual(code, 0)
-        self.assertEqual(dispatch["status"], "dispatched")
-        report_path = self.root / "worker.json"
+        self.assertEqual(dispatch["status"], "prepared")
+        report_path = Path(topify_supervisor._employee(self.campaign, "producer-001")["job_root"]) / "worker.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps({
             "status": "completed",
             "summary": "candidate complete",
@@ -104,7 +105,8 @@ class SupervisorProtocolTests(unittest.TestCase):
             seed_id="systems-software-engineering/cpython/lead-001",
             fingerprint_file=self.fingerprint,
         )
-        report_path = self.root / "worker.json"
+        report_path = Path(topify_supervisor._employee(self.campaign, "producer-001")["job_root"]) / "worker.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps({
             "status": "heartbeat",
             "summary": "currently measuring the executable prototype",
@@ -137,6 +139,31 @@ class SupervisorProtocolTests(unittest.TestCase):
         )
         self.assertEqual(state.auth(None), ("owner", None))
         self.assertIsNone(state.owner_token)
+
+    def test_owner_and_worker_conversation_is_persisted(self):
+        topify_supervisor.hire(
+            self.campaign, "chat-producer", "producer", "opencode-task",
+            seed_id="systems-software-engineering/cpython/chat-001",
+            fingerprint_file=self.fingerprint,
+        )
+        sent, code = topify_supervisor.send_message(
+            self.campaign, "employee", "chat-producer",
+            "请汇报当前 r0 的主要可学习性弱点。",
+        )
+        self.assertEqual(code, 0)
+        reply, code = topify_supervisor.send_message(
+            self.campaign, "employee", "chat-producer",
+            "已收到消息，正在安排第一次 hardening challenge。",
+            sender_type="employee", sender_id="chat-producer",
+            reply_to=sent["message_id"],
+        )
+        self.assertEqual(code, 0)
+        messages, code = topify_supervisor.list_messages(
+            self.campaign, "employee", "chat-producer"
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(messages[0]["message_id"], sent["message_id"])
+        self.assertEqual(reply["reply_to"], sent["message_id"])
 
     def test_mandatory_two_round_hardening_before_qc(self):
         topify_supervisor.hire(

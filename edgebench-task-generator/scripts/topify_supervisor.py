@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 
 import topify_common as common
+from topify_ledger_lock import mutation
 import topify_dedup
 import topify_profile
 import topify_seed
@@ -28,7 +29,7 @@ EMPLOYEE_STATES = frozenset({
     "queued", "active", "running", "waiting-qc", "repair-required",
     "rollout-pending", "rollout-running", "awaiting-approval",
     "needs-owner-decision", "replacement-required", "complete", "fired",
-    "hardening-r1-required", "hardening-r2-required",
+    "hardening-r1-required", "hardening-r2-required", "dispatch-created",
 })
 REPORT_STATES = frozenset({"heartbeat", "completed", "blocked", "failed", "question"})
 QC_STATES = frozenset({"pass", "repair_required", "fail", "pass_with_exception"})
@@ -209,6 +210,7 @@ def _load_manifest(root: Path, campaign: dict) -> dict:
     return manifest
 
 
+@mutation
 def initialize(
     workspace: str | Path,
     mode: str = "dual",
@@ -216,12 +218,17 @@ def initialize(
     dedup_root: str | Path | None = None,
     supervisor_id: str | None = None,
     benchmark: str | None = None,
+    dedup_mode: str | None = None,
 ) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     supervision = _supervision_root(root)
     if mode not in {"dual", "opencode-task", "orca-cli"}:
         raise common.PipelineError("supervisor mode must be dual, opencode-task or orca-cli")
     config = _supervision_config(campaign)
+    if dedup_mode is not None:
+        if dedup_mode not in {"strict", "warn"}:
+            raise common.PipelineError("dedup_mode must be strict or warn")
+        config["dedup_mode"] = dedup_mode
     supervisor_id = supervisor_id or campaign["config"].get("campaign_id", "supervisor")
     supervisor_id = _id(supervisor_id, "supervisor_id")
     benchmark = benchmark or "Benchmark"
@@ -334,9 +341,10 @@ def _save_employee(root: Path, value: dict) -> None:
 
 
 def _active_count(root: Path) -> int:
-    return sum(item.get("employment_status") in {"active", "running", "waiting-qc", "repair-required", "rollout-pending", "rollout-running", "awaiting-approval", "needs-owner-decision", "replacement-required", "hardening-r1-required", "hardening-r2-required"} for item in _employees(root))
+    return sum(item.get("employment_status") in {"active", "running", "dispatch-created", "waiting-qc", "repair-required", "rollout-pending", "rollout-running", "awaiting-approval", "needs-owner-decision", "replacement-required", "hardening-r1-required", "hardening-r2-required"} for item in _employees(root))
 
 
+@mutation
 def hire(
     workspace: str | Path,
     employee_id: str,
@@ -473,7 +481,7 @@ def _last_gate(root: Path, employee_id: str) -> dict | None:
     return common.load_json(gates[-1])
 
 
-def _report_summary(employee: dict) -> dict | None:
+def _report_summary(root: Path, employee: dict) -> dict | None:
     receipt = employee.get("last_report")
     if not isinstance(receipt, dict):
         return None
@@ -485,8 +493,8 @@ def _report_summary(employee: dict) -> dict | None:
     }
     path = receipt.get("report_path")
     if isinstance(path, str):
-        report_path = Path(path)
-        if report_path.is_file() and not report_path.is_symlink():
+        report_path = Path(path).resolve()
+        if report_path.is_file() and not report_path.is_symlink() and report_path.is_relative_to(root):
             try:
                 report = common.load_json(report_path)
                 if _text(report.get("summary")):
@@ -519,7 +527,7 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
             "status": employee.get("employment_status"),
             "job_root": employee.get("job_root"),
             "last_dispatch_id": employee.get("last_dispatch_id"),
-            "report": _report_summary(employee),
+            "report": _report_summary(root, employee),
             "qc": employee.get("last_qc_decision"),
             "rollout_gate": gate,
         }
@@ -554,6 +562,7 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
     }, 0
 
 
+@mutation
 def fire(workspace: str | Path, employee_id: str, reason: str, evidence: str | Path | None = None) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     _load_manifest(root, campaign)
@@ -586,6 +595,7 @@ def fire(workspace: str | Path, employee_id: str, reason: str, evidence: str | P
     return {"terminated_root": employee_id, "terminated_employees": fired}, 0
 
 
+@mutation
 def child_request(
     workspace: str | Path,
     parent_id: str,
@@ -647,6 +657,7 @@ def child_request(
     return value, 0
 
 
+@mutation
 def dispatch(workspace: str | Path, employee_id: str, output: str | Path | None = None) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     manifest = _load_manifest(root, campaign)
@@ -678,6 +689,7 @@ def dispatch(workspace: str | Path, employee_id: str, output: str | Path | None 
         "prompt_path": prompt,
         "prompt_sha256": employee.get("prompt_sha256"),
         "contract_sha256": employee["employment_contract_sha256"],
+        "execution_status": "awaiting_transport",
         "worker_contract": "send heartbeat while active; report completion exactly once; ask through supervisor gate",
         "open_code": {
             "action": "native-task-or-opencode-run",
@@ -709,7 +721,7 @@ def dispatch(workspace: str | Path, employee_id: str, output: str | Path | None 
     task["dispatch_sha256"] = common.canonical_sha256(task)
     path = attempt / "dispatch.json"
     common.write_new_json(path, task)
-    employee = {**employee, "employment_status": "running", "last_dispatch_id": dispatch_id,
+    employee = {**employee, "employment_status": "dispatch-created", "last_dispatch_id": dispatch_id,
                 "last_dispatch_path": str(path)}
     _save_employee(root, employee)
     _append(root, "employee_dispatched", employee_id=employee_id, dispatch_id=dispatch_id,
@@ -719,9 +731,10 @@ def dispatch(workspace: str | Path, employee_id: str, output: str | Path | None 
         if destination.exists() or destination.is_symlink() or not destination.parent.is_dir():
             raise common.PipelineError("dispatch output must be a new file in an existing directory")
         destination.write_text(json.dumps(task, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return {"status": "dispatched", "dispatch": task, "path": str(path), "manifest_modes": manifest["transport_modes"]}, 0
+    return {"status": "prepared", "dispatch": task, "path": str(path), "manifest_modes": manifest["transport_modes"]}, 0
 
 
+@mutation
 def report(workspace: str | Path, employee_id: str, report_file: str | Path) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     _load_manifest(root, campaign)
@@ -748,17 +761,21 @@ def report(workspace: str | Path, employee_id: str, report_file: str | Path) -> 
         "recorded_at": common.utc_now(),
     }
     common.write_new_json(attempt / "receipt.json", receipt)
-    state = {
-        "heartbeat": "running",
-        "completed": (
-            "hardening-r1-required" if employee.get("role") == "producer" and revision == 0
-            else "hardening-r2-required" if employee.get("role") == "producer" and revision == 1
-            else "awaiting-approval"
-        ),
-        "blocked": "needs-owner-decision",
-        "question": "needs-owner-decision",
-        "failed": "needs-owner-decision",
-    }[status_value]
+    if status_value == "heartbeat":
+        state = employee.get("employment_status")
+        if state in {"active", "running", "dispatch-created"}:
+            state = "running"
+    else:
+        state = {
+            "completed": (
+                "hardening-r1-required" if employee.get("role") == "producer" and revision == 0
+                else "hardening-r2-required" if employee.get("role") == "producer" and revision == 1
+                else "awaiting-approval"
+            ),
+            "blocked": "needs-owner-decision",
+            "question": "needs-owner-decision",
+            "failed": "needs-owner-decision",
+        }[status_value]
     _save_employee(root, {
         **employee,
         "employment_status": state,
@@ -781,6 +798,7 @@ def _message_target(root: Path, target_type: str, target_id: str) -> Path:
     return directory
 
 
+@mutation
 def send_message(
     workspace: str | Path,
     target_type: str,
@@ -846,6 +864,7 @@ def list_messages(
     return values, 0
 
 
+@mutation
 def hardening_challenge(
     workspace: str | Path,
     producer_id: str,
@@ -885,6 +904,7 @@ def hardening_challenge(
     return challenge, 0
 
 
+@mutation
 def dedup_claim(workspace: str | Path, employee_id: str, fingerprint_file: str | Path) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     manifest = _load_manifest(root, campaign)
@@ -907,6 +927,7 @@ def dedup_claim(workspace: str | Path, employee_id: str, fingerprint_file: str |
     return claim_value, 0
 
 
+@mutation
 def dedup_register_task(workspace: str | Path, employee_id: str, task_sha256: str) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     manifest = _load_manifest(root, campaign)
@@ -925,6 +946,7 @@ def dedup_register_task(workspace: str | Path, employee_id: str, task_sha256: st
     return result, 0
 
 
+@mutation
 def qc_decision(
     workspace: str | Path,
     producer_id: str,
@@ -988,6 +1010,7 @@ def qc_decision(
     return {**receipt, "next_employee_state": next_state}, 0
 
 
+@mutation
 def qc_resolve(
     workspace: str | Path,
     producer_id: str,
@@ -1094,6 +1117,7 @@ def evaluate_rollout(profile: dict, observations: dict, final: bool = False) -> 
     return {"status": "CONTINUE", "action": "continue_rollout", "checkpoints": checkpoint_results, "reasons": []}
 
 
+@mutation
 def rollout_gate(
     workspace: str | Path,
     employee_id: str,
@@ -1173,6 +1197,7 @@ def rollout_gate(
     return result, 0 if result["status"] in {"CONTINUE", "ACCEPT"} else 2
 
 
+@mutation
 def replace_seed(
     workspace: str | Path,
     former_employee_id: str,

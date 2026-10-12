@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import secrets
 import stat
+import threading
 import time
 from urllib.parse import parse_qs, urlparse
 
@@ -87,6 +88,10 @@ class ConsoleState:
         self.adopt_legacy = adopt_legacy
         self.discovery_dedup_root = dedup_root
         self.legacy_benchmark = legacy_benchmark
+        self._discovery_at = 0.0
+        self._discovery_interval = 3.0
+        self._discovery_lock = threading.Lock()
+        self.discovery_error = None
         if registry_file is not None or scan_roots:
             registry = (topify_registry.load(registry_file) if registry_file is not None else
                         topify_registry.discover(scan_roots or [], adopt_legacy, dedup_root, legacy_benchmark))
@@ -128,21 +133,36 @@ class ConsoleState:
     def refresh_discovery(self) -> None:
         if not self.scan_roots:
             return
-        registry = topify_registry.discover(
-            self.scan_roots, self.adopt_legacy,
-            self.discovery_dedup_root, self.legacy_benchmark,
-        )
-        refreshed = {}
-        for item in registry["supervisors"]:
-            existing = self.contexts.get(item["supervisor_id"])
-            if existing is not None and existing.root == Path(item["campaign"]).resolve():
-                refreshed[item["supervisor_id"]] = existing
-            else:
-                refreshed[item["supervisor_id"]] = SupervisorContext(
-                    item["supervisor_id"], item["benchmark"], item["campaign"]
+        now = time.monotonic()
+        if now - self._discovery_at < self._discovery_interval:
+            return
+        with self._discovery_lock:
+            now = time.monotonic()
+            if now - self._discovery_at < self._discovery_interval:
+                return
+            try:
+                registry = topify_registry.discover(
+                    self.scan_roots, self.adopt_legacy,
+                    self.discovery_dedup_root, self.legacy_benchmark,
                 )
-        self.contexts = refreshed
-        self.dedup_root = registry.get("dedup_root")
+                refreshed = {}
+                for item in registry["supervisors"]:
+                    existing = self.contexts.get(item["supervisor_id"])
+                    if existing is not None and existing.root == Path(item["campaign"]).resolve():
+                        refreshed[item["supervisor_id"]] = existing
+                    else:
+                        refreshed[item["supervisor_id"]] = SupervisorContext(
+                            item["supervisor_id"], item["benchmark"], item["campaign"]
+                        )
+                self.contexts = refreshed
+                self.dedup_root = registry.get("dedup_root")
+                self.discovery_error = None
+                self._discovery_at = now
+            except (common.PipelineError, OSError, ValueError, TypeError) as exc:
+                self.discovery_error = str(exc)
+                self._discovery_at = now
+                if not self.contexts:
+                    raise
 
     def context(self, supervisor_id: str | None, auth: tuple[str, str | None], required: bool = True) -> SupervisorContext | None:
         self.refresh_discovery()
@@ -340,7 +360,11 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         try:
             while time.monotonic() < deadline:
                 dashboard = self.state.dashboard(supervisor_id)
-                fingerprint = common.canonical_sha256(dashboard)
+                events = self._events(self._context(self._auth(), supervisor_id))
+                fingerprint = common.canonical_sha256({
+                    "dashboard": dashboard,
+                    "last_event": events[-1] if events else None,
+                })
                 if fingerprint != previous:
                     payload = _json_bytes(dashboard).decode("utf-8").rstrip("\n")
                     self.wfile.write(f"event: dashboard\ndata: {payload}\n\n".encode("utf-8"))
@@ -350,6 +374,13 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     self.wfile.write(b": heartbeat\n\n")
                     self.wfile.flush()
                 time.sleep(2)
+        except (common.PipelineError, ValueError, TypeError) as exc:
+            try:
+                payload = _json_bytes({"status": "discovery-error", "error": str(exc)}).decode("utf-8").rstrip("\n")
+                self.wfile.write(f"event: error\ndata: {payload}\n\n".encode("utf-8"))
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
         except (BrokenPipeError, ConnectionResetError, OSError):
             return
 

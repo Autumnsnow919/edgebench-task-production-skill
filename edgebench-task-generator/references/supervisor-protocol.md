@@ -28,8 +28,10 @@ waits on `orchestration check`; the owner does not need to open a terminal pane.
 The Web console also provides direct conversations. Owner messages are stored
 as immutable `message.json` receipts under the target supervisor/employee
 inbox. Supervisors, producers and QC workers must read their inbox at each
-heartbeat and reply with `employee-message` (including `--reply-to`); a queued
-message is not answered until a reply receipt exists.
+heartbeat and reply in that same target conversation with `employee-message`
+(including `--reply-to`); a queued message is not answered until a reply
+receipt exists. A worker can send a separate supervisor-targeted message for
+escalation.
 
 ## Authority model
 

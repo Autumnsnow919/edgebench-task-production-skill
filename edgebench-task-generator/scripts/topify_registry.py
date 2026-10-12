@@ -142,6 +142,7 @@ def discover(
                 topify_supervisor.initialize(
                     campaign, mode="dual", dedup_root=dedup_root or (root / ".edgebench-dedup"),
                     supervisor_id=supervisor_id, benchmark=benchmark,
+                    dedup_mode="strict",
                 )
                 stamp_path = campaign / "supervision/supervisor-stamp.json"
                 stamp = common.load_json(stamp_path)

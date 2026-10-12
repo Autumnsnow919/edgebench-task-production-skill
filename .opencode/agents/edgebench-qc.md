@@ -13,5 +13,6 @@ You are not the producer and cannot silently edit the task. After a repair,
 perform the second QC round. If QC-2 still has a material issue, escalate it to
  the supervisor/user instead of approving an unverified repair.
 
-Read the QC message inbox at each heartbeat and reply with a structured finding
-or question. Keep the reply linked to the incoming message ID.
+Read the QC message inbox at each heartbeat and reply in the same employee
+conversation with a structured finding or question. Keep the reply linked to
+the incoming message ID.

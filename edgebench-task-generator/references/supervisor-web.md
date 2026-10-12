@@ -86,6 +86,10 @@ The UI can queue owner text for the supervisor, dispatch an employee and record
 termination of an employee tree. The HTTP API also exposes replacement and QC
 resolution actions. All actions append to the existing audit ledger.
 
+The dispatch button creates a signed dispatch receipt; it does not pretend that
+an OpenCode Task or Orca worker has started. The supervisor transport must
+start the actual worker and send a heartbeat before the card becomes `running`.
+
 The console never accepts arbitrary shell commands or PIDs. A termination is a
 ledger decision; the transport supervisor stops only exact processes/dispatches
 owned by the employee. Frozen task edits and raw score edits are not exposed.
