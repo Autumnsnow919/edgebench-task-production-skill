@@ -157,14 +157,36 @@
     if (tab === 'questions') renderDetailQuestions();
   }
   function closeInspector() {selection = null; selectionEpoch++; $('inspector').classList.add('hidden'); $('inspector').setAttribute('aria-hidden','true');}
+  function prepareEmployeeInspector(id, tab) {
+    const known = data?.employees?.find(e => e.employee_id === id) || null;
+    selection = {kind:'employee', id, employee:known || {employee_id:id, status:'loading'}, sessionId:known?.session_id};
+    $('inspector').classList.remove('hidden'); $('inspector').setAttribute('aria-hidden','false');
+    $('detail-title').textContent = id; $('detail-role').textContent = known ? `${label(known.role)} · ${label(known.transport)}` : '正在读取员工详情…';
+    $('detail-avatar').textContent = known ? label(known.role).slice(0,1) : '…'; $('detail-status').textContent = known ? label(known.status) : '加载中';
+    $('detail-state').innerHTML = '<h3>正在读取实际状态</h3><p>点击已收到，正在读取该员工及其原生问题。没有创建新的审批或普通消息。</p>';
+    $('detail-evidence').innerHTML = '<h3>证据</h3><p>读取中…</p>';
+    $('detail-json').textContent = ''; $('detail-log').textContent = '';
+    $('dispatch-worker').hidden = false; $('fire-worker').hidden = false;
+    $('dispatch-worker').disabled = true; $('fire-worker').disabled = true;
+    $('employee-chat-input').disabled = true; $('employee-chat-send').disabled = true;
+    $('employee-chat-input').value = ''; $('detail-messages').textContent = '';
+    $('employee-chat-status').textContent = '正在核验实际会话；未核验前不会发送消息。';
+    openTab(tab);
+  }
   async function showEmployee(id, tab = 'overview') {
     const capturedScope = scope; const epoch = ++selectionEpoch;
+    prepareEmployeeInspector(id, tab);
     try {
       const value = await api(`/api/dashboard?${query({employee_id:id})}`);
       if (scope !== capturedScope || selectionEpoch !== epoch) return;
-      const employee = value.employees?.[0]; if (!employee) return;
-      selection = {kind:'employee', id, employee, sessionId:employee.session_id};
-      $('inspector').classList.remove('hidden'); $('inspector').setAttribute('aria-hidden','false');
+      const employee = value.employees?.[0];
+      if (!employee) {
+        $('detail-status').textContent = '未找到';
+        $('detail-state').innerHTML = `<h3>没有返回该员工</h3><p>${esc(id)} 不在当前 supervisor 的可见员工树中。请刷新工作区后重试。</p>`;
+        $('employee-chat-status').textContent = '详情读取失败，未发送任何消息。';
+        return;
+      }
+      selection.employee = employee; selection.sessionId = employee.session_id;
       $('detail-title').textContent = id; $('detail-role').textContent = `${label(employee.role)} · ${label(employee.transport)}`;
       $('detail-avatar').textContent = label(employee.role).slice(0,1); $('detail-status').textContent = label(employee.status);
       $('detail-state').innerHTML = `<h3>当前状态</h3><p>${esc(action(employee))}</p><p>阶段：${esc(label(employee.phase))}<br>实际会话：${esc(employee.session_id || '未绑定')}<br>会话状态：${esc(label(employee.runtime?.status))}<br>上级：${esc(label(employee.parent_id))}<br>独占目录：${esc(employee.job_root)}</p>${stageMarkup(employee)}`;
@@ -177,9 +199,18 @@
       $('employee-chat-input').value = ''; $('detail-messages').textContent = '';
       $('employee-chat-status').textContent = employee.runtime?.can_chat ? '消息提交到此员工的实际会话；原生问题请在“待回答”中选择。' : '未核验可操纵会话，不能直接发送。';
       openTab(tab);
-      if (employee.runtime?.can_chat) await refreshChat();
-      await refreshQuestions();
-    } catch (error) {if (epoch === selectionEpoch) $('connection').textContent = error.message;}
+      await Promise.all([
+        employee.runtime?.can_chat ? refreshChat() : Promise.resolve(),
+        refreshQuestions(true),
+      ]);
+    } catch (error) {
+      if (epoch === selectionEpoch) {
+        $('detail-status').textContent = '读取失败';
+        $('detail-state').innerHTML = `<h3>读取失败</h3><p>${esc(error.message)}</p>`;
+        $('employee-chat-status').textContent = '没有发送消息；请稍后重试。';
+        $('connection').textContent = error.message;
+      }
+    }
   }
   async function showSession(id) {
     const session = data?.opencode_sessions?.sessions?.find(s => s.session_id === id);
@@ -216,36 +247,56 @@
     })});
     nativeForms = nativeForms.filter(f => f.form_id !== form.form_id);
     formsFingerprint = ''; setConnection('原生回答已提交');
+    await Promise.all([refreshQuestions(selection?.kind === 'employee'), refresh()]);
     return value;
   }
   function renderDetailQuestions() {
     const box=$('detail-question-list'); box.replaceChildren();
-    const questions = nativeForms.filter(f => f.session_id === selection?.sessionId);
+    const questions = nativeForms.filter(f => {
+      if (!selection) return false;
+      if (selection.kind === 'employee') {
+        const employeeId = f.metadata?.edgebench?.employee_id;
+        return employeeId === selection.id || Boolean(selection.sessionId && f.session_id === selection.sessionId);
+      }
+      return f.session_id === selection.sessionId;
+    });
     $('detail-question-status').textContent = questions.length ? `${questions.length} 个原生问题待回答` : '此会话暂无原生待回答问题；不会从员工状态伪造审批选项。';
     for (const f of questions) window.OpenCodeDecisions.mount(box,f,submitNative);
     if (selection?.kind === 'employee') {
       const note = document.createElement('div');
       note.className = 'ledger-question-note';
-      note.textContent = `员工台账状态：${label(selection.employee.status)}。这里只显示 OpenCode 原生问题；审批选项必须由上司会话创建，不在这里伪造。`;
+      const waiting = ['needs-owner-decision','replacement-required','repair-required','rollout-pending','awaiting-approval'].includes(selection.employee.status);
+      note.textContent = questions.length
+        ? `员工台账状态：${label(selection.employee.status)}。上方问题来自绑定的 OpenCode 会话；审批选项没有由 Web 伪造。`
+        : waiting
+          ? `员工台账状态：${label(selection.employee.status)}，但当前上司会话没有可回答的原生问题。Web 不会伪造审批；请让上司会话重新创建并刷新。`
+          : `员工台账状态：${label(selection.employee.status)}。这里只显示 OpenCode 原生问题。`;
       box.append(note);
     }
   }
-  async function refreshQuestions() {
+  async function refreshQuestions(selectionOnly = false) {
     if (!scope || formsRefreshing) return;
     formsRefreshing=true; const currentScope=scope;
     try {
-      const value=await api(`/api/opencode-forms?${query({})}`);
+      const fields = selectionOnly && selection?.kind === 'employee' ? {employee_id:selection.id} : {};
+      const value=await api(`/api/opencode-forms?${query(fields)}`);
       if (scope !== currentScope) return;
       $('native-question-count').textContent=value.status==='ok' ? `${value.forms?.length || 0} 个待回答` : '暂不可用';
-      if(value.status!=='ok') {$('native-question-note').textContent=value.reason || '原生问题查询失败。'; return;}
-      $('native-question-note').textContent='选项来自 OpenCode 原生提问。选择或自填后核对、确认提交，不发送普通聊天消息。';
-      const fingerprint=JSON.stringify(value.forms || []);
-      if(fingerprint===formsFingerprint) return;
-      nativeForms=value.forms || []; formsFingerprint=fingerprint;
-      $('native-question-list').replaceChildren();
-      for(const f of nativeForms) window.OpenCodeDecisions.mount($('native-question-list'),f,submitNative);
-      if(!nativeForms.length) $('native-question-list').textContent='当前没有原生问题。新问题出现后会自动显示；也可点开会话进入“待回答”。';
-      if(selection) renderDetailQuestions();
+       if(value.status!=='ok') {
+         $('native-question-note').textContent=value.reason || '原生问题查询失败。';
+         if(selection) renderDetailQuestions();
+         return;
+       }
+       $('native-question-note').textContent='选项来自 OpenCode 原生提问。选择或自填后核对、确认提交，不发送普通聊天消息。';
+       const fingerprint=JSON.stringify(value.forms || []);
+       const changed = fingerprint !== formsFingerprint;
+       nativeForms=value.forms || []; formsFingerprint=fingerprint;
+       if(changed) {
+         $('native-question-list').replaceChildren();
+         for(const f of nativeForms) window.OpenCodeDecisions.mount($('native-question-list'),f,submitNative);
+         if(!nativeForms.length) $('native-question-list').textContent='当前没有原生问题。新问题出现后会自动显示；也可点开会话进入“待回答”。';
+       }
+       if(selection) renderDetailQuestions();
     } catch(error) {if(scope===currentScope){$('native-question-count').textContent='查询失败'; $('native-question-note').textContent=error.message;}}
     finally {formsRefreshing=false;}
   }

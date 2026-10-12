@@ -130,6 +130,31 @@ class SupervisorProtocolTests(unittest.TestCase):
         self.assertEqual(dashboard["employees"][0]["report"]["status"], "heartbeat")
         self.assertIn("measuring", dashboard["employees"][0]["report"]["summary"])
 
+    def test_dashboard_detail_returns_child_employee_without_promoting_it_to_a_card(self):
+        topify_supervisor.hire(
+            self.campaign, "producer-parent", "producer", "opencode-task",
+        )
+        topify_supervisor.hire(
+            self.campaign, "producer-parent-seed", "seed-worker", "opencode-task",
+            parent_id="producer-parent",
+        )
+        overview, code = topify_supervisor.dashboard(self.campaign)
+        self.assertEqual(code, 0)
+        self.assertEqual([row["employee_id"] for row in overview["employees"]], ["producer-parent"])
+        detail, code = topify_supervisor.dashboard(self.campaign, "producer-parent-seed")
+        self.assertEqual(code, 0)
+        self.assertEqual([row["employee_id"] for row in detail["employees"]], ["producer-parent-seed"])
+        self.assertEqual(detail["employees"][0]["parent_id"], "producer-parent")
+
+    def test_shared_runtime_snapshot_does_not_drop_employee_runtime_fields(self):
+        topify_supervisor.hire(
+            self.campaign, "runtime-producer", "producer", "opencode-task",
+        )
+        context = topify_web.SupervisorContext("default", "EdgeBench", self.campaign)
+        value = context.dashboard(runtime_snapshot={"status": "ok", "sessions": [], "active_session_ids": []})
+        self.assertIn("runtime", value["employees"][0])
+        self.assertEqual(value["employees"][0]["runtime"]["status"], "unbound")
+
     def test_web_token_files_are_owner_only(self):
         owner = self.root / "owner.token"
         supervisor = self.root / "supervisor.token"

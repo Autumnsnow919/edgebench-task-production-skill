@@ -69,6 +69,7 @@ class SupervisorContext:
         self._runtime_lock = threading.Lock()
         self._forms_at = 0.0
         self._forms_snapshot = {"status": "ok", "forms": []}
+        self._forms_cache = {}
         self.session_directory = Path(session_directory).resolve() if session_directory else self.root
 
     def describe(self) -> dict:
@@ -85,20 +86,23 @@ class SupervisorContext:
             "lock_state": lock.get("state") if lock else "not-locked",
         }
 
-    def dashboard(self, employee_id: str | None = None) -> dict:
+    def dashboard(self, employee_id: str | None = None, runtime_snapshot: dict | None = None) -> dict:
         value, _ = topify_supervisor.dashboard(self.root, employee_id)
         now = time.monotonic()
         with self._runtime_lock:
+            if runtime_snapshot is not None:
+                self._opencode_snapshot = runtime_snapshot
+                self._opencode_at = now
             active = None
+            if isinstance(self._opencode_snapshot, dict) and self._opencode_snapshot.get("status") == "ok":
+                active_ids = self._opencode_snapshot.get("active_session_ids")
+                if isinstance(active_ids, list):
+                    active = {session_id: {"type": "running"} for session_id in active_ids
+                              if isinstance(session_id, str)}
             for employee in value["employees"]:
                 key = (employee["employee_id"], employee.get("session_id"), employee["job_root"], employee["status"])
                 cached = self._employee_runtime_cache.get(key)
                 if cached is None or now - cached[0] >= 5:
-                    if employee.get("session_id") and active is None:
-                        try:
-                            active = topify_opencode._get("/api/session/active").get("data", {})
-                        except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired):
-                            active = None
                     runtime = topify_opencode.employee_runtime(employee, active)
                     self._employee_runtime_cache[key] = (now, runtime)
                 employee["runtime"] = self._employee_runtime_cache[key][1]
@@ -108,14 +112,8 @@ class SupervisorContext:
             "unbound": sum(e["runtime"]["status"] == "unbound" for e in value["employees"]),
             "production_started": any(e["role"] == "producer" and e["runtime"]["status"] == "running" for e in value["employees"]),
         }
-        if now - self._opencode_at >= 3:
-            try:
-                self._opencode_snapshot = topify_opencode.sessions(self.session_directory)
-            except (common.PipelineError, OSError, ValueError, TypeError) as exc:
-                self._opencode_snapshot = {
-                    "status": "unavailable", "reason": str(exc),
-                    "sessions": [], "active_count": 0,
-                }
+        if runtime_snapshot is not None:
+            self._opencode_snapshot = runtime_snapshot
             self._opencode_at = now
         return {
             "supervisor_id": self.supervisor_id,
@@ -125,21 +123,36 @@ class SupervisorContext:
             **value,
         }
 
-    def questions(self, session_id=None, force=False):
+    def questions(self, session_id=None, employee_id=None, force=False):
         if session_id:
             return topify_opencode.pending_forms(self.session_directory, session_id=session_id)
         now = time.monotonic()
+        cache_key = ("employee", employee_id) if employee_id else ("global",)
         with self._runtime_lock:
-            if force or now - self._forms_at >= 5:
-                directories = [e["job_root"] for e in topify_supervisor._employees(self.root)
-                               if e.get("session_id")]
-                try:
-                    self._forms_snapshot = topify_opencode.pending_forms(self.session_directory, directories)
-                except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired):
-                    self._forms_snapshot = {"status": "unavailable", "forms": [],
-                                            "reason": "无法读取 OpenCode 待回答问题，请稍后刷新。"}
-                self._forms_at = now
-        return self._forms_snapshot
+            cached = self._forms_cache.get(cache_key)
+            if not force and cached is not None and now - cached[0] < 5:
+                return cached[1]
+            try:
+                if employee_id:
+                    employee = topify_supervisor._employee(self.root, employee_id)
+                    manifest = common.load_json(self.root / "supervision/manifest.json")
+                    session_ids = [manifest.get("supervisor_session_id"), employee.get("session_id")]
+                    snapshot = topify_opencode.pending_forms_for_sessions(
+                        self.session_directory, session_ids
+                    )
+                else:
+                    # Owner approvals are native forms in the bound
+                    # supervisor session directory. Child sessions are queried
+                    # lazily when their employee is opened; scanning every
+                    # worktree on each page refresh made the console slow.
+                    snapshot = topify_opencode.pending_forms(self.session_directory)
+            except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+                snapshot = {"status": "unavailable", "forms": [],
+                             "reason": "无法读取 OpenCode 待回答问题，请稍后刷新。"}
+            self._forms_cache[cache_key] = (now, snapshot)
+            self._forms_snapshot = snapshot
+            self._forms_at = now
+            return snapshot
 
 
 class ConsoleState:
@@ -165,9 +178,17 @@ class ConsoleState:
         self.discovery_dedup_root = dedup_root
         self.legacy_benchmark = legacy_benchmark
         self._discovery_at = 0.0
-        self._discovery_interval = 3.0
+        # Discovery walks the owner-approved scan root recursively. It is
+        # configuration refresh, not request-time runtime monitoring; doing it
+        # every few seconds serializes clicks, SSE and dashboard reads behind a
+        # filesystem scan. Existing contexts remain available immediately.
+        self._discovery_interval = 30.0
         self._discovery_lock = threading.Lock()
         self.discovery_error = None
+        self._runtime_at = 0.0
+        self._runtime_interval = 5.0
+        self._runtime_lock = threading.Lock()
+        self._runtime_snapshot = {"status": "not-queried", "sessions": [], "active_count": 0}
         if registry_file is not None or scan_roots:
             registry = (topify_registry.load(registry_file) if registry_file is not None else
                         topify_registry.discover(scan_roots or [], adopt_legacy, dedup_root, legacy_benchmark))
@@ -208,6 +229,32 @@ class ConsoleState:
         if not value:
             return None
         return self.tokens.get(_token_hash(value))
+
+    def runtime_snapshot(self) -> dict:
+        now = time.monotonic()
+        if now - self._runtime_at < self._runtime_interval:
+            return self._runtime_snapshot
+        with self._runtime_lock:
+            now = time.monotonic()
+            if now - self._runtime_at < self._runtime_interval:
+                return self._runtime_snapshot
+            if not self.contexts:
+                self._runtime_snapshot = {
+                    "status": "unavailable", "reason": "没有已登记的 supervisor",
+                    "sessions": [], "active_count": 0,
+                }
+                self._runtime_at = now
+                return self._runtime_snapshot
+            directory = self.scan_roots[0] if self.scan_roots else next(iter(self.contexts.values())).session_directory
+            try:
+                self._runtime_snapshot = topify_opencode.sessions(directory)
+            except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
+                self._runtime_snapshot = {
+                    "status": "unavailable", "reason": str(exc),
+                    "sessions": [], "active_count": 0, "active_session_ids": [],
+                }
+            self._runtime_at = now
+            return self._runtime_snapshot
 
     def refresh_discovery(self) -> None:
         if not self.scan_roots:
@@ -274,8 +321,8 @@ class ConsoleState:
     def dashboard(self, supervisor_id: str | None = None, employee_id: str | None = None) -> dict:
         self.refresh_discovery()
         if supervisor_id is not None:
-            return self.contexts[supervisor_id].dashboard(employee_id)
-        rows = [context.dashboard() for context in self.contexts.values()]
+            return self.contexts[supervisor_id].dashboard(employee_id, self.runtime_snapshot())
+        rows = [context.dashboard(runtime_snapshot=self.runtime_snapshot()) for context in self.contexts.values()]
         return {
             "schema_version": 1,
             "aggregate": True,
@@ -415,7 +462,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 auth = self._require(supervisor_id=supervisor_id)
                 context = self._context(auth, supervisor_id)
                 session_id = parse_qs(parsed.query).get("session_id", [None])[0]
-                result = context.questions(session_id)
+                employee_id = parse_qs(parsed.query).get("employee_id", [None])[0]
+                result = context.questions(session_id, employee_id)
                 self._respond(200, result)
                 return
             if parsed.path == "/api/employee-session":
@@ -471,8 +519,9 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             while time.monotonic() < deadline:
                 dashboard = self.state.dashboard(supervisor_id)
                 events = self._events(self._context(self._auth(), supervisor_id))
+                stable_dashboard = {key: value for key, value in dashboard.items() if key != "generated_at"}
                 fingerprint = common.canonical_sha256({
-                    "dashboard": dashboard,
+                    "dashboard": stable_dashboard,
                     "last_event": events[-1] if events else None,
                 })
                 if fingerprint != previous:
@@ -625,6 +674,15 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     context.session_directory, body["session_id"],
                     body["form_id"], body["answer"],
                 )
+                # A native reply is only the interaction receipt. If this is
+                # an owner-decision form, immediately consume that receipt in
+                # the production ledger so the Workforce state cannot remain
+                # falsely pending after the owner has answered.
+                if topify_supervisor._owner_form_employee_id(context.root, body["form_id"]):
+                    synced, sync_code = topify_supervisor.sync_owner_form_by_form(
+                        context.root, body["form_id"]
+                    )
+                    result = {**result, "ledger_sync": synced, "ledger_sync_code": sync_code}
                 context.questions(force=True)
                 self._respond(200, result)
                 return

@@ -346,6 +346,14 @@ def _employee(root: Path, employee_id: str) -> dict:
     return value
 
 
+def _owner_form_employee_id(root: Path, form_id: str) -> str | None:
+    """Return the ledger employee bound to a native owner form, if any."""
+    for employee in _employees(root):
+        if employee.get("owner_form", {}).get("form_id") == form_id:
+            return employee["employee_id"]
+    return None
+
+
 def _tree(root: Path, employee_id: str) -> list[dict]:
     values = {item["employee_id"]: item for item in _employees(root)}
     if employee_id not in values:
@@ -671,7 +679,7 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
             })
         # The Workforce view is one card per top-level employee. Child helpers
         # remain in the parent card's timeline and are never duplicated as cards.
-        if employee.get("parent_id") == "supervisor":
+        if employee.get("parent_id") == "supervisor" or employee_id is not None:
             rows.append(row)
     return {
         "schema_version": 1,
@@ -1284,8 +1292,11 @@ def owner_decision(
     _load_manifest(root, campaign)
     if decision not in {"approve_rollout", "reject_rollout", "accept_exception", "fire"}:
         raise common.PipelineError("unknown owner decision")
-    if not _text(note):
-        raise common.PipelineError("owner decision needs a note")
+    if decision in {"reject_rollout", "fire"} and not _text(note):
+        raise common.PipelineError("退回或淘汰必须填写说明")
+    note = note.strip() if isinstance(note, str) else ""
+    if not note:
+        note = "Owner approved without additional note."
     employee = _employee(root, employee_id)
     evidence_path = _regular_file(evidence, "owner decision evidence") if evidence else None
     allowed = {
@@ -1337,17 +1348,27 @@ def create_owner_form(workspace: str | Path, employee_id: str, note: str = "") -
         raise common.PipelineError("该员工当前没有待负责人审批的台账状态")
     current_form = employee.get("owner_form")
     if current_form and current_form.get("status") == "pending":
-        existing = topify_opencode._get(
-            f"/api/session/{current_form['session_id']}/form/{current_form['form_id']}"
-        ).get("data", {})
-        note_field = next((field for field in existing.get("fields", []) if field.get("key") == "note"), None)
-        if note_field is not None and note_field.get("required") is False:
-            return current_form, 0
+        existing = None
         try:
-            topify_opencode.cancel_form(current_form["session_id"], current_form["form_id"],
-                                        "Superseded: acceptance note is optional.")
+            existing = topify_opencode._get(
+                f"/api/session/{current_form['session_id']}/form/{current_form['form_id']}"
+            ).get("data", {})
         except (common.PipelineError, OSError, ValueError, TypeError):
+            # Native forms are live OpenCode objects. A restarted/finished
+            # session can discard one while the durable ledger still says
+            # pending; in that case the supervisor may recreate it.
             pass
+        if isinstance(existing, dict) and existing.get("id") == current_form.get("form_id"):
+            note_field = next((field for field in existing.get("fields", []) if field.get("key") == "note"), None)
+            if note_field is not None and note_field.get("required") is False:
+                return current_form, 0
+            try:
+                topify_opencode.cancel_form(
+                    current_form["session_id"], current_form["form_id"],
+                    "Superseded: acceptance note is optional."
+                )
+            except (common.PipelineError, OSError, ValueError, TypeError):
+                pass
         _save_employee(root, {**employee, "owner_form": {**current_form, "status": "superseded"}})
     options = [{"value": "accept_exception", "label": "接受例外", "description": "保留该员工并允许继续。"},
                {"value": "fire", "label": "淘汰员工子树", "description": "封存员工和子任务，后续换 Seed。"}]
@@ -1380,9 +1401,9 @@ def create_owner_form(workspace: str | Path, employee_id: str, note: str = "") -
 def sync_owner_form_by_form(workspace: str | Path, form_id: str) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     _load_manifest(root, campaign)
-    for employee in _employees(root):
-        if employee.get("owner_form", {}).get("form_id") == form_id:
-            return sync_owner_form(root, employee["employee_id"])
+    employee_id = _owner_form_employee_id(root, form_id)
+    if employee_id is not None:
+        return sync_owner_form(root, employee_id)
     raise common.PipelineError("该原生问题没有绑定生产台账员工")
 
 

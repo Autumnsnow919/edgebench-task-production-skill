@@ -138,6 +138,10 @@ def sessions(directory: str | Path, limit: int = 200) -> dict:
         "directory": str(root),
         "sessions": result,
         "active_count": sum(item["status"] == "running" for item in result),
+        # The listing is directory-scoped, but the active endpoint is global.
+        # Keep the IDs so callers can reuse one active-session query when they
+        # verify many employee bindings.
+        "active_session_ids": sorted(active),
     }
 
 
@@ -255,21 +259,7 @@ def send_message(directory: str | Path, session_id: str, text: str) -> dict:
     return {"status": "sent", "session_id": session_id, "response": result}
 
 
-def pending_forms(directory, extra_directories=(), session_id=None):
-    """Read native OpenCode questions; never invent choices from a ledger status."""
-    root = Path(directory).resolve(strict=True)
-    if session_id is not None:
-        _visible_session(root, session_id)
-        responses = [_get(f"/api/session/{session_id}/form")]
-    else:
-        directories = {root}
-        for value in extra_directories:
-            path = Path(value).resolve(strict=True)
-            if not path.is_relative_to(root):
-                raise common.PipelineError("问题目录超出批准的扫描范围。")
-            directories.add(path)
-        responses = [_get("/api/form?" + urlencode({"location[directory]": str(path)}))
-                     for path in sorted(directories)]
+def _forms_from_responses(root: Path, responses: list[dict]) -> dict:
     forms = []
     seen = set()
     for response in responses:
@@ -291,6 +281,38 @@ def pending_forms(directory, extra_directories=(), session_id=None):
                           "status": "pending", "source": "opencode-form"})
             seen.add(form["id"])
     return {"status": "ok", "forms": forms}
+
+
+def pending_forms(directory, extra_directories=(), session_id=None):
+    """Read native OpenCode questions; never invent choices from a ledger status."""
+    root = Path(directory).resolve(strict=True)
+    if session_id is not None:
+        _visible_session(root, session_id)
+        responses = [_get(f"/api/session/{session_id}/form")]
+    else:
+        directories = {root}
+        for value in extra_directories:
+            path = Path(value).resolve(strict=True)
+            if not path.is_relative_to(root):
+                raise common.PipelineError("问题目录超出批准的扫描范围。")
+            directories.add(path)
+        responses = [_get("/api/form?" + urlencode({"location[directory]": str(path)}))
+                     for path in sorted(directories)]
+    return _forms_from_responses(root, responses)
+
+
+def pending_forms_for_sessions(directory: str | Path, session_ids) -> dict:
+    """Read pending forms from a small, explicitly selected session set."""
+    root = Path(directory).resolve(strict=True)
+    responses = []
+    seen_sessions = set()
+    for session_id in session_ids:
+        if not isinstance(session_id, str) or session_id in seen_sessions:
+            continue
+        _visible_session(root, session_id)
+        responses.append(_get(f"/api/session/{session_id}/form"))
+        seen_sessions.add(session_id)
+    return _forms_from_responses(root, responses)
 
 
 def validate_form_answer(fields, answer):
