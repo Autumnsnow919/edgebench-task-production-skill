@@ -31,6 +31,11 @@ artifact and architecture shapes before task authoring.
 
 ## Interactive session workflow
 
+For a reusable chat-first launch work order across Benchmarks, read
+[`批量量产启动.md`](批量量产启动.md). Fill its parameters and ask the
+OpenCode/Orca supervisor to execute it; writing or reading the template alone
+does not start production.
+
 Use the Skill in the current OpenCode session. The session finds and verifies a
 Seed before authoring a task:
 
