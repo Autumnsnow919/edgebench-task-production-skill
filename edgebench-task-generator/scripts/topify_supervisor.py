@@ -600,6 +600,7 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
         }
         if employee.get("employment_status") in {
             "needs-owner-decision", "replacement-required", "repair-required",
+            "rollout-pending", "awaiting-approval",
         }:
             alerts.append({
                 "kind": "employee-state",
@@ -1211,6 +1212,59 @@ def qc_resolve(
     _append(root, "qc_resolution_recorded", producer_id=producer_id, decision=decision,
             resolution_sha256=resolution["resolution_sha256"])
     return {"resolution": resolution, "employee": value}, 0
+
+
+@mutation
+def owner_decision(
+    workspace: str | Path,
+    employee_id: str,
+    decision: str,
+    note: str,
+    evidence: str | Path | None = None,
+) -> tuple[dict, int]:
+    root, campaign = _root(workspace)
+    _load_manifest(root, campaign)
+    if decision not in {"approve_rollout", "reject_rollout", "accept_exception", "fire"}:
+        raise common.PipelineError("unknown owner decision")
+    if not _text(note):
+        raise common.PipelineError("owner decision needs a note")
+    employee = _employee(root, employee_id)
+    evidence_path = _regular_file(evidence, "owner decision evidence") if evidence else None
+    allowed = {
+        "approve_rollout": {"rollout-pending", "awaiting-approval"},
+        "reject_rollout": {"rollout-pending", "awaiting-approval"},
+        "accept_exception": {"needs-owner-decision"},
+        "fire": {"needs-owner-decision", "replacement-required", "repair-required"},
+    }
+    if employee.get("employment_status") not in allowed[decision]:
+        raise common.PipelineError(
+            f"decision {decision} is not valid for employee state {employee.get('employment_status')}"
+        )
+    receipt = {
+        "schema_version": 1,
+        "employee_id": employee_id,
+        "decision": decision,
+        "note": note,
+        "evidence_path": str(evidence_path) if evidence_path else None,
+        "evidence_sha256": common.sha256_file(evidence_path) if evidence_path else None,
+        "recorded_at": common.utc_now(),
+    }
+    receipt["decision_sha256"] = common.canonical_sha256(receipt)
+    number, attempt = common.next_attempt(root / "supervision/decisions" / employee_id)
+    receipt["attempt"] = number
+    common.write_new_json(attempt / "owner-decision.json", receipt)
+    if decision == "fire":
+        result, _ = fire(root, employee_id, f"Owner decision: {note}", evidence_path)
+        employee_result = result
+    else:
+        next_state = "rollout-authorized" if decision == "approve_rollout" else (
+            "replacement-required" if decision == "reject_rollout" else "rollout-pending"
+        )
+        employee_result = {**employee, "employment_status": next_state, "owner_decision": receipt}
+        _save_employee(root, employee_result)
+    _append(root, "owner_decision_recorded", employee_id=employee_id,
+            decision=decision, decision_sha256=receipt["decision_sha256"])
+    return {"decision": receipt, "employee": employee_result}, 0
 
 
 def _metric(observations: dict, metric: str, entries: list[dict]) -> float | None:

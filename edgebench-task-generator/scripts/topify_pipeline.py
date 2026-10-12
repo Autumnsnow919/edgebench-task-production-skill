@@ -358,6 +358,12 @@ def parser() -> argparse.ArgumentParser:
     qc_resolve.add_argument("--decision", choices=sorted(topify_supervisor.QC_DECISIONS), required=True)
     qc_resolve.add_argument("--note", required=True)
     qc_resolve.add_argument("--evidence", type=Path)
+    owner_decision = commands.add_parser("owner-decision", help="approve or reject a production gate")
+    owner_decision.add_argument("workspace", type=Path)
+    owner_decision.add_argument("--employee-id", required=True)
+    owner_decision.add_argument("--decision", choices=("approve_rollout", "reject_rollout", "accept_exception", "fire"), required=True)
+    owner_decision.add_argument("--note", required=True)
+    owner_decision.add_argument("--evidence", type=Path)
     rollout_gate = commands.add_parser("supervisor-rollout-gate", help="evaluate profile-bound early rollout policy")
     rollout_gate.add_argument("workspace", type=Path)
     rollout_gate.add_argument("--employee-id", required=True)
@@ -774,6 +780,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "qc-resolve":
             report, code = topify_supervisor.qc_resolve(
                 args.workspace, args.producer_id, args.decision,
+                args.note, args.evidence,
+            )
+        elif args.command == "owner-decision":
+            report, code = topify_supervisor.owner_decision(
+                args.workspace, args.employee_id, args.decision,
                 args.note, args.evidence,
             )
         elif args.command == "supervisor-rollout-gate":

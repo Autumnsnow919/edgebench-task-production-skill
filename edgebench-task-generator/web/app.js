@@ -121,7 +121,24 @@
     </article>`;
   }
   function renderAlerts(alerts) {
-    $('alerts').innerHTML = alerts.length ? alerts.slice(0, 5).map(item => `<div class="attention-item"><strong>${esc(item.employee_id)} · ${esc(item.status)}</strong><small>${esc(item.action || 'Owner decision required')}</small></div>`).join('') : '<div class="empty">Everything is moving normally.</div>';
+    $('alerts').innerHTML = alerts.length ? alerts.slice(0, 8).map(item => {
+      const actions = item.status === 'rollout-pending' || item.status === 'awaiting-approval'
+        ? '<button class="alert-action approve" data-decision="approve_rollout">批准 rollout</button><button class="alert-action reject" data-decision="reject_rollout">退回</button>'
+        : item.status === 'needs-owner-decision'
+          ? '<button class="alert-action approve" data-decision="accept_exception">接受例外</button><button class="alert-action reject" data-decision="fire">淘汰</button>'
+          : item.status === 'replacement-required'
+            ? '<button class="alert-action reject" data-decision="fire">确认淘汰并换 Seed</button>' : '';
+      return `<div class="attention-item"><strong>${esc(item.employee_id)} · ${esc(statusLabel(item.status))}</strong><small>${esc(item.action || '需要 Owner 决定')}</small><div class="alert-actions">${actions}</div></div>`;
+    }).join('') : '<div class="empty">当前没有待你处理的事项。</div>';
+    document.querySelectorAll('.alert-action').forEach(button => button.addEventListener('click', () => ownerDecision(button.dataset.decision, button.closest('.attention-item').querySelector('strong').textContent.split(' · ')[0])));
+  }
+  async function ownerDecision(decision, employeeId) {
+    const note = window.prompt(`请输入对 ${employeeId} 的决定说明：`);
+    if (!note) return;
+    try {
+      await api('/api/owner-decision', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, employee_id: employeeId, decision, note }) });
+      await refresh();
+    } catch (error) { window.alert(error.message); }
   }
   function renderActivity(events) {
     lastEvents = events;
