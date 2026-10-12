@@ -34,6 +34,19 @@
     if (['fired', 'failed'].includes(status)) return 'bad';
     return 'good';
   }
+  function statusLabel(status) {
+    return ({
+      'needs-owner-decision': 'Needs approval',
+      'replacement-required': 'Replace',
+      'repair-required': 'Repair',
+      'dispatch-created': 'Prepared',
+      'rollout-running': 'Rollout',
+      'rollout-pending': 'Rollout ready',
+      'awaiting-approval': 'Awaiting approval',
+      'hardening-r1-required': 'Harden r1',
+      'hardening-r2-required': 'Harden r2',
+    })[status] || status || 'Unknown';
+  }
   function stageMarkup(employee) {
     const revision = employee.hardening_revision;
     const stages = [['Seed', Boolean(employee.seed_id)],
@@ -102,7 +115,7 @@
     const kind = statusKind(employee.status);
     const report = employee.report || {};
     return `<article class="agent-card" style="--card-tint:${kind === 'bad' ? '#fbe7e5' : kind === 'warn' ? '#fff0d9' : '#e3f3e9'}">
-      <div class="card-top"><div class="agent-identity"><span class="agent-avatar">${roleLetter(employee)}</span><div><strong>${esc(employee.employee_id)}</strong><small>${esc(employee.role)} · ${esc(employee.transport || 'native')}</small></div></div><span class="card-status ${kind}"><i></i>${esc(employee.status || 'unknown')}</span></div>
+      <div class="card-top"><div class="agent-identity"><span class="agent-avatar">${roleLetter(employee)}</span><div><strong title="${esc(employee.employee_id)}">${esc(employee.employee_id)}</strong><small>${esc(employee.role)} · ${esc(employee.transport || 'native')}</small></div></div><span title="${esc(employee.status || 'unknown')}" class="card-status ${kind}"><i></i>${esc(statusLabel(employee.status))}</span></div>
       <div class="card-body"><div class="card-action">Now <b>${esc(currentAction(employee))}</b></div><small>Phase: ${esc(employee.phase || '未报告')} · Runtime: ${esc(employee.runtime?.status || '未知')}</small>${stageMarkup(employee)}</div>
       <div class="card-footer"><span>${esc(employee.session_id || employee.task_id || employee.seed_id || employee.phase || 'No task assigned')}</span><button class="inspect-agent" data-id="${esc(employee.employee_id)}">Open inspector →</button></div>
     </article>`;
@@ -164,7 +177,7 @@
       selectedSession = null;
       $('inspector').classList.remove('hidden'); $('inspector').setAttribute('aria-hidden', 'false');
       $('detail-title').textContent = selected.employee_id; $('detail-role').textContent = `${selected.role} · ${selected.transport || 'native'} · ${selected.task_id || selected.seed_id || 'unassigned'}`;
-      $('detail-avatar').textContent = roleLetter(selected); $('detail-status').textContent = selected.status || 'unknown';
+      $('detail-avatar').textContent = roleLetter(selected); $('detail-status').textContent = statusLabel(selected.status);
       $('detail-state').innerHTML = `<h3>Current state</h3><p><b>${esc(currentAction(selected))}</b></p><p class="muted-line">Phase: ${esc(selected.phase || '未报告')}<br>Hardening: ${esc(selected.hardening_revision ?? '未报告')}<br>Session: ${esc(selected.session_id || '未绑定')}<br>Runtime: ${esc(selected.runtime?.status || '未知')}<br>Parent: ${esc(selected.parent_id || 'supervisor')}<br>Job root: ${esc(selected.job_root || '—')}</p>${stageMarkup(selected)}`;
       $('detail-evidence').innerHTML = `<h3>Latest evidence</h3><p>QC: ${esc(selected.qc?.decision || '—')}<br>Rollout: ${esc(selected.rollout_gate?.status || '—')}<br>Report: ${esc(selected.report?.status || '—')}</p>`;
       $('detail-json').textContent = JSON.stringify(selected, null, 2); $('detail-log').textContent = selected.report?.summary || 'No worker summary has been reported yet.';
