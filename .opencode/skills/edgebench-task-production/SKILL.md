@@ -94,9 +94,9 @@ ordinary directory name or an unverified agent process.
 
 When the owner asks for a Web control panel, read
 `edgebench-task-generator/references/supervisor-web.md` and start the
-authenticated `supervisor-web` server through the shell. Use the owner-approved
-bind address; `0.0.0.0` is allowed for a trusted network, not a public unauthenticated
-service. The supervisor must also read pending owner commands under
+`supervisor-web` server through the shell. Use `--no-auth` only when the owner
+explicitly requests trusted private-network access; `0.0.0.0` is allowed for a
+trusted network, not a public unauthenticated service. The supervisor must also read pending owner commands under
 `CAMPAIGN/supervision/commands/` and report their outcome; a queued Web command
 is not yet an executed agent action.
 

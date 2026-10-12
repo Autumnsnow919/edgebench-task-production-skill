@@ -90,9 +90,11 @@ class ConsoleState:
         if registry_file is not None or scan_roots:
             registry = (topify_registry.load(registry_file) if registry_file is not None else
                         topify_registry.discover(scan_roots or [], adopt_legacy, dedup_root, legacy_benchmark))
-            owner_token = owner_token or _read_token_file(registry.get("owner_token_file"), "registry owner_token_file")
+            if self.auth_enabled:
+                owner_token = owner_token or _read_token_file(registry.get("owner_token_file"), "registry owner_token_file")
             for item in registry["supervisors"]:
-                token = _read_token_file(item.get("supervisor_token_file"), f"{item['supervisor_id']} supervisor token")
+                token = (_read_token_file(item.get("supervisor_token_file"), f"{item['supervisor_id']} supervisor token")
+                         if self.auth_enabled else None)
                 context = SupervisorContext(item["supervisor_id"], item["benchmark"], item["campaign"])
                 self.contexts[context.supervisor_id] = context
                 if token is not None:
@@ -102,15 +104,17 @@ class ConsoleState:
         else:
             if campaign is None:
                 raise common.PipelineError("campaign or registry_file is required")
-            owner_token = owner_token or _read_token_file(owner_token_file, "owner_token_file")
-            supervisor_token = supervisor_token or _read_token_file(supervisor_token_file, "supervisor_token_file")
+            if self.auth_enabled:
+                owner_token = owner_token or _read_token_file(owner_token_file, "owner_token_file")
+                supervisor_token = supervisor_token or _read_token_file(supervisor_token_file, "supervisor_token_file")
             context = SupervisorContext("default", "Benchmark", campaign)
             self.contexts["default"] = context
-            self.supervisor_token = supervisor_token or _token()
-            self.tokens[_token_hash(self.supervisor_token)] = ("supervisor", "default")
+            self.supervisor_token = (supervisor_token or _token()) if self.auth_enabled else None
+            if self.auth_enabled:
+                self.tokens[_token_hash(self.supervisor_token)] = ("supervisor", "default")
             self.registry_file = None
             self.dedup_root = None
-        self.owner_token = owner_token or _token()
+        self.owner_token = (owner_token or _token()) if self.auth_enabled else None
         if self.auth_enabled:
             self.tokens[_token_hash(self.owner_token)] = ("owner", None)
 

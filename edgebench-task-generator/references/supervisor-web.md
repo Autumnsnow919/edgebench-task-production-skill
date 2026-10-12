@@ -100,7 +100,8 @@ from silently becoming an untracked shell command.
 
 ## API
 
-Authenticated requests use `Authorization: Bearer TOKEN`:
+With token mode, requests use `Authorization: Bearer TOKEN`. In `--no-auth`
+mode, the same endpoints are available without a token:
 
 ```text
 GET  /api/me

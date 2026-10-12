@@ -113,8 +113,10 @@
   }
   function switchSupervisor(id) { currentSupervisor = id; history.replaceState(null, '', `?supervisor_id=${encodeURIComponent(id)}`); renderWorkspaces(); $('inspector').classList.add('hidden'); if (stream) stream.close(); refresh(); connect(); }
   function connect() {
-    if (!token || !currentSupervisor) return;
-    stream = new EventSource(`/api/stream?token=${encodeURIComponent(token)}&supervisor_id=${encodeURIComponent(currentSupervisor)}`);
+    if (!currentSupervisor) return;
+    const query = new URLSearchParams({ supervisor_id: currentSupervisor });
+    if (token) query.set('token', token);
+    stream = new EventSource(`/api/stream?${query}`);
     stream.addEventListener('dashboard', event => { try { renderDashboard(JSON.parse(event.data)); $('connection').innerHTML = '<i></i>Live'; $('connection').className = 'connection'; } catch (_) {} });
     stream.onerror = () => { $('connection').textContent = 'Reconnecting'; $('connection').className = 'connection error'; };
   }

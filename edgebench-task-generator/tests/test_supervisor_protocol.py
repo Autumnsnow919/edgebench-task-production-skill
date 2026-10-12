@@ -131,6 +131,13 @@ class SupervisorProtocolTests(unittest.TestCase):
         self.assertEqual(state.auth("owner-secret"), ("owner", None))
         self.assertEqual(state.auth("supervisor-secret"), ("supervisor", "default"))
 
+    def test_no_auth_state_accepts_browser_requests_without_token(self):
+        state = topify_web.ConsoleState(
+            self.campaign, None, None, auth_enabled=False
+        )
+        self.assertEqual(state.auth(None), ("owner", None))
+        self.assertIsNone(state.owner_token)
+
     def test_registry_keeps_multiple_supervisors_on_one_console(self):
         global_dedup = self.root / "dedup-global"
         first = self.root / "first-campaign"
