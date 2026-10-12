@@ -25,6 +25,12 @@ session can additionally inspect the selected native Task's result. In Orca,
 the supervisor maps the selected dispatch to `worker-show`/`worker-read` and
 waits on `orchestration check`; the owner does not need to open a terminal pane.
 
+The Web console also provides direct conversations. Owner messages are stored
+as immutable `message.json` receipts under the target supervisor/employee
+inbox. Supervisors, producers and QC workers must read their inbox at each
+heartbeat and reply with `employee-message` (including `--reply-to`); a queued
+message is not answered until a reply receipt exists.
+
 ## Authority model
 
 ```text

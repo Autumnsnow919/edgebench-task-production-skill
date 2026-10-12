@@ -80,6 +80,14 @@
   function renderActivity(events) {
     $('activity').innerHTML = events.length ? events.slice(-7).reverse().map(event => `<div class="activity-item"><i class="activity-dot"></i><div><strong>${esc(event.event || 'event')}</strong><small>${esc(event.employee_id || event.supervisor_id || 'system')} · ${esc(event.status || event.reason || '')}</small></div><span class="activity-time">${ago(event.recorded_at)}</span></div>`).join('') : '<div class="empty">No recent activity.</div>';
   }
+  function renderMessages(messages, containerId, emptyText) {
+    $(containerId).innerHTML = messages.length ? messages.map(message => `<div class="message-bubble ${message.sender_type === 'owner' ? 'owner' : ''}"><div class="message-meta">${esc(message.sender_id || message.sender_type)} · ${ago(message.created_at)}</div><p>${esc(message.text)}</p></div>`).join('') : `<div class="empty">${esc(emptyText)}</div>`;
+    const list = $(containerId); list.scrollTop = list.scrollHeight;
+  }
+  async function loadMessages(targetType, targetId) {
+    const value = await api(`/api/messages?supervisor_id=${encodeURIComponent(currentSupervisor)}&target_type=${encodeURIComponent(targetType)}&target_id=${encodeURIComponent(targetId)}`);
+    renderMessages(value.messages || [], 'detail-messages', 'No messages yet. Start a conversation with this agent.');
+  }
   async function refresh() {
     try {
       if (!currentSupervisor) return;
@@ -107,6 +115,7 @@
       $('detail-state').innerHTML = `<h3>Current state</h3><p><b>${esc(currentAction(selected))}</b></p><p class="muted-line">Parent: ${esc(selected.parent_id || 'supervisor')}<br>Job root: ${esc(selected.job_root || '—')}</p>`;
       $('detail-evidence').innerHTML = `<h3>Latest evidence</h3><p>QC: ${esc(selected.qc?.decision || '—')}<br>Rollout: ${esc(selected.rollout_gate?.status || '—')}<br>Report: ${esc(selected.report?.status || '—')}</p>`;
       $('detail-json').textContent = JSON.stringify(selected, null, 2); $('detail-log').textContent = selected.report?.summary || 'No worker summary has been reported yet.';
+      await loadMessages('employee', selected.employee_id);
       document.querySelectorAll('.inspector-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === 'overview'));
       document.querySelectorAll('.inspector-body').forEach(body => body.classList.toggle('hidden', body.id !== 'detail-overview'));
     } catch (error) { window.alert(error.message); }
@@ -121,15 +130,16 @@
     stream.onerror = () => { $('connection').textContent = 'Reconnecting'; $('connection').className = 'connection error'; };
   }
   async function sendCommand(text) {
-    const result = await api('/api/command', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, text }) });
-    $('command-result').textContent = `Queued for ${result.supervisor_id}`; return result;
+    const result = await api('/api/message', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, target_type: 'supervisor', target_id: currentSupervisor, text }) });
+    $('command-result').textContent = `Sent to ${result.target_id}`; return result;
   }
   $('refresh').addEventListener('click', refresh);
-  $('command-open').addEventListener('click', () => $('command-modal').classList.remove('hidden'));
+  $('command-open').addEventListener('click', async () => { $('command-modal').classList.remove('hidden'); try { const value = await api(`/api/messages?supervisor_id=${encodeURIComponent(currentSupervisor)}&target_type=supervisor&target_id=${encodeURIComponent(currentSupervisor)}`); renderMessages(value.messages || [], 'supervisor-messages', 'No supervisor messages yet.'); } catch (error) { $('command-result').textContent = error.message; } });
   $('command-close').addEventListener('click', () => $('command-modal').classList.add('hidden'));
   $('close-detail').addEventListener('click', () => { $('inspector').classList.add('hidden'); $('inspector').setAttribute('aria-hidden', 'true'); });
   document.querySelector('.inspector-backdrop').addEventListener('click', () => $('inspector').classList.add('hidden'));
   $('command-form').addEventListener('submit', async event => { event.preventDefault(); const text = $('command-input').value.trim(); if (!text) return; try { await sendCommand(text); $('command-input').value = ''; } catch (error) { $('command-result').textContent = error.message; } });
+  $('employee-chat-form').addEventListener('submit', async event => { event.preventDefault(); if (!selected) return; const input = $('employee-chat-input'); const text = input.value.trim(); if (!text) return; try { await api('/api/message', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, target_type: 'employee', target_id: selected.employee_id, text }) }); input.value = ''; await loadMessages('employee', selected.employee_id); } catch (error) { window.alert(error.message); } });
   $('dispatch-worker').addEventListener('click', async () => { if (!selected) return; try { await api('/api/dispatch', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, employee_id: selected.employee_id }) }); await refresh(); await showInspector(selected.employee_id); } catch (error) { window.alert(error.message); } });
   $('fire-worker').addEventListener('click', async () => { if (!selected || !window.confirm(`Fire ${selected.employee_id} and its child tree?`)) return; const reason = window.prompt('Reason'); if (!reason) return; try { await api('/api/fire', { method: 'POST', body: JSON.stringify({ supervisor_id: currentSupervisor, employee_id: selected.employee_id, reason }) }); await refresh(); await showInspector(selected.employee_id); } catch (error) { window.alert(error.message); } });
   document.querySelectorAll('.inspector-tab').forEach(tab => tab.addEventListener('click', () => {

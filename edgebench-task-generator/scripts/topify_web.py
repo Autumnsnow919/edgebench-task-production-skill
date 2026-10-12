@@ -289,6 +289,18 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 context = self._context(auth, supervisor_id)
                 self._respond(200, {"supervisor_id": context.supervisor_id, "events": self._events(context)})
                 return
+            if parsed.path == "/api/messages":
+                supervisor_id = self._query_supervisor_id()
+                auth = self._require(supervisor_id=supervisor_id)
+                context = self._context(auth, supervisor_id)
+                query = parse_qs(parsed.query)
+                messages, _ = topify_supervisor.list_messages(
+                    context.root, query.get("target_type", ["supervisor"])[0],
+                    query.get("target_id", ["supervisor"])[0],
+                    int(query.get("limit", [100])[0]),
+                )
+                self._respond(200, {"supervisor_id": context.supervisor_id, "messages": messages})
+                return
             if parsed.path == "/api/stream":
                 self._stream()
                 return
@@ -413,6 +425,17 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 context = self._context(("owner", None), body.get("supervisor_id"))
                 result = self._write_command(context, body)
                 self._respond(201, result)
+                return
+            if parsed.path == "/api/message":
+                body = self._body()
+                auth = self._require(supervisor_id=body.get("supervisor_id"))
+                context = self._context(auth, body.get("supervisor_id"))
+                result, code = topify_supervisor.send_message(
+                    context.root, body["target_type"], body["target_id"], body["text"],
+                    sender_type=auth[0], sender_id=auth[1] or "owner",
+                    reply_to=body.get("reply_to"),
+                )
+                self._respond(201 if code == 0 else 409, result)
                 return
             self._respond(404, {"error": "not found"})
         except PermissionError:

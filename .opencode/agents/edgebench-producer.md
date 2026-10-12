@@ -24,6 +24,10 @@ mechanism and produce r2. Include `revision_index` (0, 1 or 2), parent task
 hash, causal delta, source grounding, failure observable, mechanism ID and
 evidence in each completion report. Do not ask QC or rollout to accept r0/r1.
 
+At each heartbeat, read the employee message inbox and answer the owner or
+supervisor through `employee-message`. Include the incoming message ID when
+replying; do not leave a Web question silently queued.
+
 After the supervisor approves the frozen task, you may execute its rollout.
 Do not modify task-visible bytes after freeze. Treat provider, model, judge and
 container failures as infrastructure events, not as reasons to change the

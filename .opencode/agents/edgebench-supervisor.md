@@ -13,3 +13,7 @@ request, and ask the owner only at explicit approval or escalation gates. Use
 the OpenCode native Task tool in this session, or the headless Orca CLI when
 the active transport is `orca-cli`. Never claim a worker completed work until
 its receipt and hashes are recorded.
+
+At each heartbeat, read pending messages in the supervisor inbox and reply
+through the message ledger. A Web chat message is not complete until you
+acknowledge it and record the resulting action or question.

@@ -301,6 +301,18 @@ def parser() -> argparse.ArgumentParser:
     employee_report.add_argument("workspace", type=Path)
     employee_report.add_argument("--employee-id", required=True)
     employee_report.add_argument("--input", required=True, type=Path)
+    employee_message = commands.add_parser("employee-message", help="send a worker reply or question through the message ledger")
+    employee_message.add_argument("workspace", type=Path)
+    employee_message.add_argument("--employee-id", required=True)
+    employee_message.add_argument("--target-type", choices=("supervisor", "employee"), required=True)
+    employee_message.add_argument("--target-id", required=True)
+    employee_message.add_argument("--text", required=True)
+    employee_message.add_argument("--reply-to")
+    message_list = commands.add_parser("message-list", help="read the conversation for an employee or supervisor")
+    message_list.add_argument("workspace", type=Path)
+    message_list.add_argument("--target-type", choices=("supervisor", "employee"), required=True)
+    message_list.add_argument("--target-id", required=True)
+    message_list.add_argument("--limit", type=int, default=100)
     hardening = commands.add_parser("hardening-challenge", help="record the mandatory supervisor difficulty challenge")
     hardening.add_argument("workspace", type=Path)
     hardening.add_argument("--producer-id", required=True)
@@ -699,6 +711,17 @@ def main(argv: list[str] | None = None) -> int:
             report, code = topify_supervisor.report(
                 args.workspace, args.employee_id, args.input
             )
+        elif args.command == "employee-message":
+            report, code = topify_supervisor.send_message(
+                args.workspace, args.target_type, args.target_id, args.text,
+                sender_type="employee", sender_id=args.employee_id,
+                reply_to=args.reply_to,
+            )
+        elif args.command == "message-list":
+            messages, code = topify_supervisor.list_messages(
+                args.workspace, args.target_type, args.target_id, args.limit
+            )
+            report = {"messages": messages}
         elif args.command == "hardening-challenge":
             report, code = topify_supervisor.hardening_challenge(
                 args.workspace, args.producer_id, args.round,

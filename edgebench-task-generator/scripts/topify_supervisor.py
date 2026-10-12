@@ -770,6 +770,82 @@ def report(workspace: str | Path, employee_id: str, report_file: str | Path) -> 
     return receipt, 0
 
 
+def _message_target(root: Path, target_type: str, target_id: str) -> Path:
+    if target_type not in {"supervisor", "employee"}:
+        raise common.PipelineError("message target_type must be supervisor or employee")
+    _id(target_id, "target_id")
+    directory = root / "supervision/messages" / f"{target_type}--{target_id}"
+    if directory.is_symlink() or directory.exists() and not directory.is_dir():
+        raise common.PipelineError("message target directory is unsafe")
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def send_message(
+    workspace: str | Path,
+    target_type: str,
+    target_id: str,
+    text: str,
+    sender_type: str = "owner",
+    sender_id: str = "owner",
+    reply_to: str | None = None,
+) -> tuple[dict, int]:
+    root, campaign = _root(workspace)
+    _load_manifest(root, campaign)
+    if sender_type not in {"owner", "supervisor", "employee"}:
+        raise common.PipelineError("message sender_type is invalid")
+    if not _text(text) or len(text) > 20_000:
+        raise common.PipelineError("message text must be nonempty and at most 20000 characters")
+    if sender_type != "owner":
+        _id(sender_id, "sender_id")
+    if target_type == "employee":
+        _employee(root, target_id)
+    elif target_type == "supervisor":
+        manifest = common.load_json(root / "supervision/manifest.json")
+        supervisor_id = manifest.get("supervisor_id", "supervisor")
+        if target_id != supervisor_id and target_id != "supervisor":
+            raise common.PipelineError("message supervisor target does not match campaign supervisor")
+    else:
+        raise common.PipelineError("message target_type is invalid")
+    if reply_to is not None:
+        _id(reply_to, "reply_to")
+    directory = _message_target(root, target_type, target_id)
+    number, attempt = common.next_attempt(directory)
+    message = {
+        "schema_version": 1,
+        "message_id": f"{target_type}-{target_id}-m{number:04d}",
+        "target_type": target_type,
+        "target_id": target_id,
+        "sender_type": sender_type,
+        "sender_id": sender_id,
+        "text": text.strip(),
+        "reply_to": reply_to,
+        "status": "queued",
+        "created_at": common.utc_now(),
+    }
+    message["message_sha256"] = common.canonical_sha256(message)
+    common.write_new_json(attempt / "message.json", message)
+    _append(root, "message_queued", message_id=message["message_id"],
+            target_type=target_type, target_id=target_id,
+            sender_type=sender_type, sender_id=sender_id,
+            message_sha256=message["message_sha256"])
+    return message, 0
+
+
+def list_messages(
+    workspace: str | Path, target_type: str, target_id: str, limit: int = 100
+) -> tuple[list[dict], int]:
+    root, campaign = _root(workspace)
+    _load_manifest(root, campaign)
+    if type(limit) is not int or not 1 <= limit <= 500:
+        raise common.PipelineError("message limit must be between 1 and 500")
+    directory = _message_target(root, target_type, target_id)
+    values = []
+    for path in sorted(directory.glob("attempt-*/message.json"))[-limit:]:
+        values.append(common.load_json(path))
+    return values, 0
+
+
 def hardening_challenge(
     workspace: str | Path,
     producer_id: str,

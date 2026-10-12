@@ -61,15 +61,16 @@
     <aside class="inspector-panel">
       <div class="inspector-top"><span class="overline">AGENT INSPECTOR</span><button id="close-detail" class="close-button">×</button></div>
       <div class="inspector-heading"><div id="detail-avatar" class="agent-avatar large">P</div><div><h2 id="detail-title">—</h2><p id="detail-role">—</p></div><span id="detail-status" class="status-chip">—</span></div>
-      <div class="inspector-tabs"><button class="inspector-tab active" data-tab="overview">Overview</button><button class="inspector-tab" data-tab="activity">Activity</button><button class="inspector-tab" data-tab="evidence">Evidence</button></div>
+      <div class="inspector-tabs"><button class="inspector-tab active" data-tab="overview">Overview</button><button class="inspector-tab" data-tab="chat">Chat</button><button class="inspector-tab" data-tab="activity">Activity</button><button class="inspector-tab" data-tab="evidence">Evidence</button></div>
       <div id="detail-overview" class="inspector-body"><div id="detail-state" class="detail-block"></div><div id="detail-evidence" class="detail-block"></div></div>
+      <div id="detail-chat" class="inspector-body hidden"><div id="detail-messages" class="message-list"></div><form id="employee-chat-form" class="chat-form"><textarea id="employee-chat-input" placeholder="与这个下属直接沟通…"></textarea><button class="action-button primary" type="submit">Send</button></form></div>
       <div id="detail-activity" class="inspector-body hidden"><pre id="detail-log" class="log-view"></pre></div>
       <div id="detail-evidence-tab" class="inspector-body hidden"><pre id="detail-json" class="json-view"></pre></div>
       <div class="inspector-actions"><button id="dispatch-worker" class="action-button primary">Dispatch / continue</button><button id="fire-worker" class="action-button danger">Fire agent tree</button></div>
     </aside>
   </div>
 
-  <div id="command-modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><div><p class="overline">OWNER CONTROL</p><h2>Ask the supervisor</h2></div><button id="command-close" class="close-button">×</button></div><p class="modal-copy">Your instruction will be written to the audit ledger and delivered to the selected supervisor.</p><form id="command-form"><textarea id="command-input" placeholder="例如：为 EdgeBench 派发 10 个 producer，优先 systems/software"></textarea><div class="modal-actions"><span id="command-result" class="form-hint">Owner commands are auditable.</span><button class="action-button primary" type="submit">Send instruction</button></div></form></div></div>
+  <div id="command-modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><div><p class="overline">SUPERVISOR CHAT</p><h2>Talk to the supervisor</h2></div><button id="command-close" class="close-button">×</button></div><p class="modal-copy">This is a persistent owner conversation with the selected supervisor. Every message is auditable.</p><div id="supervisor-messages" class="message-list modal-messages"></div><form id="command-form"><textarea id="command-input" placeholder="例如：为 EdgeBench 派发 10 个 producer，优先 systems/software"></textarea><div class="modal-actions"><span id="command-result" class="form-hint">Owner messages are queued for the supervisor.</span><button class="action-button primary" type="submit">Send message</button></div></form></div></div>
   <script src="/app.js"></script>
 </body>
 </html>
