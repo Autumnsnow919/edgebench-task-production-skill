@@ -138,6 +138,32 @@ class SupervisorProtocolTests(unittest.TestCase):
         self.assertEqual(state.auth(None), ("owner", None))
         self.assertIsNone(state.owner_token)
 
+    def test_mandatory_two_round_hardening_before_qc(self):
+        topify_supervisor.hire(
+            self.campaign, "producer-hardening", "producer", "opencode-task",
+            seed_id="systems-software-engineering/cpython/lead-hardening",
+            fingerprint_file=self.fingerprint,
+        )
+        for revision, round_number in ((0, 1), (1, 2), (2, None)):
+            topify_supervisor.dispatch(self.campaign, "producer-hardening")
+            report_path = self.root / f"hardening-{revision}.json"
+            report_path.write_text(json.dumps({
+                "status": "completed",
+                "summary": f"revision {revision} complete",
+                "revision_index": revision,
+            }))
+            topify_supervisor.report(self.campaign, "producer-hardening", report_path)
+            if round_number is not None:
+                employee = topify_supervisor._employee(self.campaign, "producer-hardening")
+                self.assertEqual(employee["employment_status"], f"hardening-r{round_number}-required")
+                topify_supervisor.hardening_challenge(
+                    self.campaign, "producer-hardening", round_number,
+                    f"Too simple: introduce distinct causal mechanism {round_number}.",
+                )
+        employee = topify_supervisor._employee(self.campaign, "producer-hardening")
+        self.assertEqual(employee["hardening_revision"], 2)
+        self.assertEqual(employee["employment_status"], "awaiting-approval")
+
     def test_registry_keeps_multiple_supervisors_on_one_console(self):
         global_dedup = self.root / "dedup-global"
         first = self.root / "first-campaign"

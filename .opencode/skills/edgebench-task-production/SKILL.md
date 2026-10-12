@@ -92,6 +92,15 @@ the Web board only when `supervision/supervisor-stamp.json` validates against
 its campaign and supervisor manifest. Do not infer a supervisor from an
 ordinary directory name or an unverified agent process.
 
+Every producer must pass the mandatory two-round difficulty challenge before
+independent QC. When r0 is reported, the supervisor must explicitly tell the
+producer that the first version is too simple for the target and require one
+new, source-grounded causal mechanism. After r1, it must issue the same
+challenge for a second distinct mechanism. Only r2 may enter QC, freeze or
+rollout. This is a structured hardening policy, not permission to falsify a
+model score; each challenge must name the observed weakness, mechanism and
+evidence. Cosmetic volume, delay, noise or reward-ceiling changes do not count.
+
 When the owner asks for a Web control panel, read
 `edgebench-task-generator/references/supervisor-web.md` and start the
 `supervisor-web` server through the shell. Use `--no-auth` only when the owner

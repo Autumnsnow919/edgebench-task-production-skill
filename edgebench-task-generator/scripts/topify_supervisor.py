@@ -28,6 +28,7 @@ EMPLOYEE_STATES = frozenset({
     "queued", "active", "running", "waiting-qc", "repair-required",
     "rollout-pending", "rollout-running", "awaiting-approval",
     "needs-owner-decision", "replacement-required", "complete", "fired",
+    "hardening-r1-required", "hardening-r2-required",
 })
 REPORT_STATES = frozenset({"heartbeat", "completed", "blocked", "failed", "question"})
 QC_STATES = frozenset({"pass", "repair_required", "fail", "pass_with_exception"})
@@ -333,7 +334,7 @@ def _save_employee(root: Path, value: dict) -> None:
 
 
 def _active_count(root: Path) -> int:
-    return sum(item.get("employment_status") in {"active", "running", "waiting-qc", "repair-required", "rollout-pending", "rollout-running", "awaiting-approval", "needs-owner-decision", "replacement-required"} for item in _employees(root))
+    return sum(item.get("employment_status") in {"active", "running", "waiting-qc", "repair-required", "rollout-pending", "rollout-running", "awaiting-approval", "needs-owner-decision", "replacement-required", "hardening-r1-required", "hardening-r2-required"} for item in _employees(root))
 
 
 def hire(
@@ -650,7 +651,7 @@ def dispatch(workspace: str | Path, employee_id: str, output: str | Path | None 
     root, campaign = _root(workspace)
     manifest = _load_manifest(root, campaign)
     employee = _employee(root, employee_id)
-    if employee.get("employment_status") not in {"active", "queued", "awaiting-approval", "repair-required"}:
+    if employee.get("employment_status") not in {"active", "queued", "repair-required"}:
         raise common.PipelineError("employee is not dispatchable in its current state")
     if employee.get("employment_status") == "queued" and _active_count(root) >= manifest["max_concurrent"]:
         raise common.PipelineError("employee is queued until a concurrency slot is available")
@@ -667,6 +668,12 @@ def dispatch(workspace: str | Path, employee_id: str, output: str | Path | None 
         "transport": employee["transport"],
         "task_id": employee.get("task_id"),
         "seed_id": employee.get("seed_id"),
+        "hardening_revision": (
+            0 if employee.get("hardening_revision") is None
+            else employee["hardening_revision"] + 1
+            if employee.get("employment_status") == "repair-required"
+            else employee.get("hardening_revision")
+        ),
         "job_root": employee["job_root"],
         "prompt_path": prompt,
         "prompt_sha256": employee.get("prompt_sha256"),
@@ -727,6 +734,9 @@ def report(workspace: str | Path, employee_id: str, report_file: str | Path) -> 
         raise common.PipelineError("employee report employee_id does not match")
     if not _text(value.get("summary")) and status_value != "heartbeat":
         raise common.PipelineError("employee report needs a summary")
+    revision = value.get("revision_index", 0)
+    if type(revision) is not int or revision not in {0, 1, 2}:
+        raise common.PipelineError("producer revision_index must be 0, 1 or 2")
     number, attempt = common.next_attempt(root / "supervision/reports" / employee_id)
     receipt = {
         "schema_version": 1,
@@ -740,15 +750,63 @@ def report(workspace: str | Path, employee_id: str, report_file: str | Path) -> 
     common.write_new_json(attempt / "receipt.json", receipt)
     state = {
         "heartbeat": "running",
-        "completed": "awaiting-approval",
+        "completed": (
+            "hardening-r1-required" if employee.get("role") == "producer" and revision == 0
+            else "hardening-r2-required" if employee.get("role") == "producer" and revision == 1
+            else "awaiting-approval"
+        ),
         "blocked": "needs-owner-decision",
         "question": "needs-owner-decision",
         "failed": "needs-owner-decision",
     }[status_value]
-    _save_employee(root, {**employee, "employment_status": state, "last_report": receipt})
+    _save_employee(root, {
+        **employee,
+        "employment_status": state,
+        "last_report": receipt,
+        **({"hardening_revision": revision} if employee.get("role") == "producer" else {}),
+    })
     _append(root, "employee_reported", employee_id=employee_id, report_status=status_value,
             report_sha256=receipt["report_sha256"])
     return receipt, 0
+
+
+def hardening_challenge(
+    workspace: str | Path,
+    producer_id: str,
+    round_number: int,
+    note: str,
+    evidence: str | Path | None = None,
+) -> tuple[dict, int]:
+    root, campaign = _root(workspace)
+    _load_manifest(root, campaign)
+    producer = _employee(root, producer_id)
+    if producer.get("role") != "producer":
+        raise common.PipelineError("hardening challenge needs a producer")
+    expected_state = "hardening-r1-required" if round_number == 1 else "hardening-r2-required"
+    if round_number not in {1, 2} or producer.get("employment_status") != expected_state:
+        raise common.PipelineError("producer is not at the requested hardening round")
+    if not _text(note):
+        raise common.PipelineError("hardening challenge needs a mechanism-specific note")
+    evidence_path = _regular_file(evidence, "hardening evidence") if evidence else None
+    challenge = {
+        "schema_version": 1,
+        "producer_id": producer_id,
+        "round": round_number,
+        "verdict": "too-simple-for-target; hardening-required",
+        "note": note,
+        "evidence_path": str(evidence_path) if evidence_path else None,
+        "evidence_sha256": common.sha256_file(evidence_path) if evidence_path else None,
+        "recorded_at": common.utc_now(),
+    }
+    challenge["challenge_sha256"] = common.canonical_sha256(challenge)
+    number, attempt = common.next_attempt(root / "supervision/decisions" / producer_id)
+    challenge["attempt"] = number
+    common.write_new_json(attempt / f"hardening-r{round_number}.json", challenge)
+    _save_employee(root, {**producer, "employment_status": "repair-required", "last_hardening_challenge": challenge})
+    _append(root, "hardening_challenge_recorded", producer_id=producer_id,
+            round=round_number, verdict=challenge["verdict"],
+            challenge_sha256=challenge["challenge_sha256"])
+    return challenge, 0
 
 
 def dedup_claim(workspace: str | Path, employee_id: str, fingerprint_file: str | Path) -> tuple[dict, int]:
@@ -813,6 +871,8 @@ def qc_decision(
     qc_tree = {item["employee_id"] for item in _tree(root, qc_id)}
     if producer_tree & qc_tree or producer_id == qc.get("parent_id") or qc_id == producer.get("parent_id"):
         raise common.PipelineError("QC employee must be independent from the producer tree")
+    if producer.get("hardening_revision") != 2:
+        raise common.PipelineError("producer must complete mandatory r0->r1->r2 hardening before QC")
     if type(round_number) is not int or round_number not in {1, 2}:
         raise common.PipelineError("QC round must be 1 or 2")
     if decision not in QC_STATES or severity not in QC_SEVERITIES:

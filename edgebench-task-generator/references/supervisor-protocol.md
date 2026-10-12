@@ -131,7 +131,21 @@ Retries use a new dispatch attempt and never reuse a fired employee's worktree.
 The normal path has at most two independent QC rounds:
 
 ```text
-producer complete → QC-1 → repair by producer → QC-2 → rollout approval
+r0 complete → supervisor “too simple” challenge → r1
+→ supervisor “still too simple” challenge → r2
+→ QC-1 → repair by producer → QC-2 → rollout approval
+```
+
+The supervisor must issue two hardening challenges after the producer's first
+completion. Each challenge is recorded with its round, observed weakness and a
+different causal mechanism requirement. r0 and r1 cannot be approved by QC or
+sent to rollout. A producer that cannot provide an honest mechanism is blocked,
+not padded with records, sleep, noise or a moved reward bound.
+
+```bash
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  hardening-challenge CAMPAIGN --producer-id producer-001 --round 1 \
+  --note "Too simple: add a source-grounded dependency coupling admission with downstream capacity."
 ```
 
 QC checks the executable task, NOP/reference behavior, error handling, score

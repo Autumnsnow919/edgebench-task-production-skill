@@ -17,6 +17,13 @@ freeze. You may request Seed or prototype child Tasks, but you cannot approve
 your own Seed, QC, exception, freeze, replacement or delivery. Report
 heartbeats, blockers and completion through the supervisor contract.
 
+Your first completion is revision r0, not a rollout candidate. Expect the
+supervisor to say it is too simple and require a measured causal hardening to
+r1. After r1, expect a second “still too simple” challenge requiring a distinct
+mechanism and produce r2. Include `revision_index` (0, 1 or 2), parent task
+hash, causal delta, source grounding, failure observable, mechanism ID and
+evidence in each completion report. Do not ask QC or rollout to accept r0/r1.
+
 After the supervisor approves the frozen task, you may execute its rollout.
 Do not modify task-visible bytes after freeze. Treat provider, model, judge and
 container failures as infrastructure events, not as reasons to change the

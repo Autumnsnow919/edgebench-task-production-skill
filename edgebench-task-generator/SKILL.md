@@ -297,7 +297,19 @@ parent hash and targets an observed weakness with a distinct lawful causal
 mechanism; read `references/hardening-family-contract.md`. No cosmetic volume,
 waiting, noise or moved reward upper. If no defensible mechanism exists, record
 blocked instead of inventing two rounds. After measured r2, the main agent
-freezes or calls `seed-shelve`; do not indefinitely iterate shallow families.
+ freezes or calls `seed-shelve`; do not indefinitely iterate shallow families.
+
+In hierarchical production these are mandatory supervisor turns, not optional
+author suggestions:
+
+```text
+r0 complete → supervisor says “too simple; harden once” → r1
+r1 complete → supervisor says “still too simple; harden a second mechanism” → r2
+r2 complete → independent QC-1 → repair/QC-2 → freeze/rollout
+```
+
+The `hardening-challenge` receipt records each verdict. QC must reject a
+producer whose `hardening_revision` is not exactly 2.
 Across the batch, compare scored source instance, input cases, work objective,
 Judge and weights; different runtimes or wrappers of one scored task count once.
 

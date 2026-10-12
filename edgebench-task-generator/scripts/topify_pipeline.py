@@ -301,6 +301,12 @@ def parser() -> argparse.ArgumentParser:
     employee_report.add_argument("workspace", type=Path)
     employee_report.add_argument("--employee-id", required=True)
     employee_report.add_argument("--input", required=True, type=Path)
+    hardening = commands.add_parser("hardening-challenge", help="record the mandatory supervisor difficulty challenge")
+    hardening.add_argument("workspace", type=Path)
+    hardening.add_argument("--producer-id", required=True)
+    hardening.add_argument("--round", required=True, type=int, choices=(1, 2))
+    hardening.add_argument("--note", required=True)
+    hardening.add_argument("--evidence", type=Path)
     dedup_claim = commands.add_parser("dedup-claim", help="reserve a Seed fingerprint before authoring")
     dedup_claim.add_argument("workspace", type=Path)
     dedup_claim.add_argument("--employee-id", required=True)
@@ -692,6 +698,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "employee-report":
             report, code = topify_supervisor.report(
                 args.workspace, args.employee_id, args.input
+            )
+        elif args.command == "hardening-challenge":
+            report, code = topify_supervisor.hardening_challenge(
+                args.workspace, args.producer_id, args.round,
+                args.note, args.evidence,
             )
         elif args.command == "dedup-claim":
             report, code = topify_supervisor.dedup_claim(
