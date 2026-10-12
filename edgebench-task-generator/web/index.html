@@ -3,77 +3,83 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>EdgeBench · Agent Operations</title>
-  <link rel="stylesheet" href="/style.css?v=workspace-boundary-1">
+  <title>EdgeBench · 智能体生产台</title>
+  <link rel="stylesheet" href="/style.css?v=zh-native-questions-20261012">
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark">E</div>
-        <div><strong>EdgeBench</strong><span>Agent Operations</span></div>
+        <div><strong>EdgeBench</strong><span>智能体生产台</span></div>
       </div>
-      <div class="side-label">WORKSPACES</div>
-      <nav id="supervisor-list" class="workspace-list"></nav>
+      <div class="side-label">工作空间</div>
+      <nav id="supervisor-list" class="workspace-list" aria-label="工作空间列表"></nav>
+      <a class="side-button decision-shortcut" href="#native-questions">审批与提问</a>
       <div class="sidebar-bottom">
-        <div class="system-card"><span class="live-dot"></span><div><strong>Supervisor network</strong><small id="side-status">Connecting…</small></div></div>
-        <button id="theme-toggle" class="side-button">◐ <span>Appearance</span></button>
+        <div class="system-card"><span class="live-dot"></span><div><strong>监督网络</strong><small id="side-status">连接中…</small></div></div>
+        <button id="theme-toggle" class="side-button">◐ <span>切换外观</span></button>
       </div>
     </aside>
-
     <main class="main-stage">
       <header class="topbar">
-        <div class="crumb"><span>Operations</span><b>/</b><strong id="workspace-title">Loading workspace</strong></div>
+        <div class="crumb"><span>运维中心</span><b>/</b><strong id="workspace-title">正在加载工作空间</strong></div>
         <div class="top-actions">
-          <button id="command-open" class="command-shortcut"><span>⌘</span> Ask supervisor <kbd>⌘ K</kbd></button>
-          <span id="connection" class="connection"><i></i>Connecting</span>
-          <button id="refresh" class="icon-button" aria-label="Refresh">↻</button>
-          <div class="owner-avatar">O</div>
+          <button id="command-open" class="command-shortcut"><span>⌘</span> 联系上司</button>
+          <span id="connection" class="connection"><i></i>连接中</span>
+          <button id="refresh" class="icon-button" aria-label="刷新">↻</button>
+          <div class="owner-avatar" title="负责人">你</div>
         </div>
       </header>
-
       <div class="content">
         <section class="welcome-row">
-          <div><p class="overline">LIVE PRODUCTION FLOOR</p><h1 id="workspace-heading">Your agents at work.</h1><p id="workspace-subtitle" class="subtitle">Monitor every task, decision and rollout from one place.</p></div>
+          <div><p class="overline">实时生产现场</p><h1 id="workspace-heading">智能体生产现场</h1><p id="workspace-subtitle" class="subtitle">集中查看任务、决策和模型试跑。</p></div>
           <div class="date-chip"><span class="pulse-ring"></span><span id="updated">—</span></div>
         </section>
-
         <section class="metric-row">
-          <div class="metric"><span>Verified running employees</span><strong id="active">—</strong><small id="active-note">waiting for runtime verification</small></div>
-          <div class="metric"><span>Available capacity</span><strong id="capacity">—</strong><small>ready to dispatch</small></div>
-          <div class="metric"><span>Needs attention</span><strong id="alert-count">—</strong><small id="alert-note">no active alerts</small></div>
-          <div class="metric accent-metric"><span>System health</span><strong id="health">Good</strong><small>ledger and stream online</small></div>
+          <div class="metric"><span>核验运行中的员工</span><strong id="active">—</strong><small id="active-note">等待核验实际会话</small></div>
+          <div class="metric"><span>可用容量</span><strong id="capacity">—</strong><small>可用名额 / 登记上限</small></div>
+          <div class="metric"><span>生产待处理事项</span><strong id="alert-count">—</strong><small id="alert-note">暂无告警</small></div>
+          <div class="metric accent-metric"><span>运行状态</span><strong id="health">检测中</strong><small>核对台账与实时连接</small></div>
         </section>
 
-        <section class="session-panel panel-surface"><div class="panel-title"><div><p class="overline">OPENCODE RUNTIME</p><h2>Live sessions</h2></div><span id="session-summary" class="hint">Detecting…</span></div><div id="session-grid" class="session-grid"></div></section>
+        <section id="native-questions" class="panel-surface native-questions-panel">
+          <div class="panel-title"><div><p class="overline">OpenCode 原生交互</p><h2>需要你回答的问题</h2></div><span id="native-question-count" class="form-hint">检测中…</span></div>
+          <p id="native-question-note" class="form-hint">选项来自 OpenCode 会话本身。选择或自填后，核对并确认提交；不会把回答作为普通聊天消息发送。</p>
+          <div id="native-question-list"></div>
+        </section>
 
-        <section class="section-head"><div><p class="overline">WORKFORCE · TASK OWNERS</p><h2>本批次出题负责人</h2></div><div class="view-actions"><button class="view-switch active" data-view="cards">Cards</button><button class="view-switch" data-view="timeline">Timeline</button><button id="filter-button" class="filter-button">Filter: All <span>☷</span></button></div></section>
-        <p id="workforce-summary" class="workforce-summary">按题展示负责人、实际会话和验收阶段；不会把临时 Scout 当作出题员工。</p>
+        <section class="session-panel panel-surface">
+          <div class="panel-title"><div><p class="overline">OpenCode 运行时 · 全局</p><h2>实时会话</h2></div><span id="session-summary" class="form-hint">检测中…</span></div>
+          <p class="scope-note">这里显示批准范围内的真实会话，不会伪装成本批次员工。点击会话查看正文或对话，查看本身不会发送消息。</p>
+          <div id="session-grid" class="session-grid"></div>
+        </section>
+        <section class="section-head"><div><p class="overline">员工队伍 · 题目负责人</p><h2>本批次出题负责人</h2></div><div class="view-actions"><button class="view-switch active" data-view="cards">卡片</button><button class="view-switch" data-view="timeline">列表</button><button id="filter-button" class="filter-button">筛选：全部 <span>☷</span></button></div></section>
+        <p id="workforce-summary" class="workforce-summary">按题展示负责人、实际会话和验收阶段；不把临时来源搜索员当作出题员工。</p>
         <section id="agent-grid" class="agent-grid"></section>
-
         <section class="lower-grid">
-          <div class="activity-panel panel-surface"><div class="panel-title"><div><p class="overline">ACTIVITY</p><h2>Live activity</h2></div><button id="activity-all" class="text-button">View all</button></div><div id="activity" class="activity-list"></div></div>
-          <div class="attention-panel panel-surface"><div class="panel-title"><div><p class="overline">ATTENTION</p><h2>Needs your decision</h2></div></div><div id="alerts" class="attention-list"></div></div>
+          <div class="activity-panel panel-surface"><div class="panel-title"><div><p class="overline">活动</p><h2>实时活动</h2></div><button id="activity-all" class="text-button">查看全部</button></div><div id="activity" class="activity-list"></div></div>
+          <div class="attention-panel panel-surface"><div class="panel-title"><div><p class="overline">生产队伍事项 · 本批次</p><h2>等待负责人处理</h2></div></div><p class="form-hint">员工台账告警与上方 OpenCode 原生提问不同；需要的回答以原提问为准。</p><div id="alerts" class="attention-list"></div></div>
         </section>
       </div>
     </main>
   </div>
-
   <div id="inspector" class="inspector hidden" aria-hidden="true">
     <div class="inspector-backdrop"></div>
     <aside class="inspector-panel">
-      <div class="inspector-top"><span class="overline">AGENT INSPECTOR</span><button id="close-detail" class="close-button">×</button></div>
-      <div class="inspector-heading"><div id="detail-avatar" class="agent-avatar large">P</div><div><h2 id="detail-title">—</h2><p id="detail-role">—</p></div><span id="detail-status" class="status-chip">—</span></div>
-      <div class="inspector-tabs"><button class="inspector-tab active" data-tab="overview">Overview</button><button class="inspector-tab" data-tab="chat">Chat</button><button class="inspector-tab" data-tab="activity">Activity</button><button class="inspector-tab" data-tab="evidence">Evidence</button></div>
+      <div class="inspector-top"><span class="overline">智能体详情</span><button id="close-detail" class="close-button" aria-label="关闭详情">×</button></div>
+      <div class="inspector-heading"><div id="detail-avatar" class="agent-avatar large">员</div><div><h2 id="detail-title">—</h2><p id="detail-role">—</p></div><span id="detail-status" class="status-chip">—</span></div>
+      <div class="inspector-tabs"><button class="inspector-tab active" data-tab="overview">概览</button><button class="inspector-tab" data-tab="chat">对话</button><button class="inspector-tab" data-tab="questions">待回答</button><button class="inspector-tab" data-tab="activity">活动</button><button class="inspector-tab" data-tab="evidence">证据</button></div>
       <div id="detail-overview" class="inspector-body"><div id="detail-state" class="detail-block"></div><div id="detail-evidence" class="detail-block"></div></div>
-      <div id="detail-chat" class="inspector-body hidden"><p id="employee-chat-status" class="form-hint"></p><div id="detail-messages" class="message-list"></div><form id="employee-chat-form" class="chat-form"><textarea id="employee-chat-input" placeholder="与这个下属直接沟通…"></textarea><button id="employee-chat-send" class="action-button primary" type="submit">Send</button></form></div>
+      <div id="detail-chat" class="inspector-body hidden"><p id="employee-chat-status" class="form-hint"></p><div id="detail-messages" class="message-list"></div><form id="employee-chat-form" class="chat-form"><textarea id="employee-chat-input" placeholder="输入发给所选会话的消息…"></textarea><button id="employee-chat-send" class="action-button primary" type="submit">发送</button></form></div>
+      <div id="detail-questions" class="inspector-body hidden"><p id="detail-question-status" class="form-hint"></p><div id="detail-question-list"></div></div>
       <div id="detail-activity" class="inspector-body hidden"><pre id="detail-log" class="log-view"></pre></div>
       <div id="detail-evidence-tab" class="inspector-body hidden"><pre id="detail-json" class="json-view"></pre></div>
-      <div class="inspector-actions"><button id="dispatch-worker" class="action-button primary">Prepare dispatch</button><button id="fire-worker" class="action-button danger">Fire agent tree</button></div>
+      <div class="inspector-actions"><button id="dispatch-worker" class="action-button primary">准备派发</button><button id="fire-worker" class="action-button danger">封存员工子树</button></div>
     </aside>
   </div>
-
-  <div id="command-modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><div><p class="overline">SUPERVISOR CHAT</p><h2>Talk to the supervisor</h2></div><button id="command-close" class="close-button">×</button></div><p class="modal-copy">This is a persistent owner conversation with the selected supervisor. Every message is auditable.</p><div id="supervisor-messages" class="message-list modal-messages"></div><form id="command-form"><textarea id="command-input" placeholder="例如：为 EdgeBench 派发 10 个 producer，优先 systems/software"></textarea><div class="modal-actions"><span id="command-result" class="form-hint">Owner messages are queued for the supervisor.</span><button class="action-button primary" type="submit">Send message</button></div></form></div></div>
-  <script src="/app.js?v=workforce-session-link-20261012"></script>
+  <div id="command-modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><div><p class="overline">上司消息</p><h2>联系本工作空间的上司</h2></div><button id="command-close" class="close-button" aria-label="关闭对话">×</button></div><p class="modal-copy">此处是持久化消息队列。原生问题请在“需要你回答的问题”中选择回答，不要用聊天消息替代。</p><div id="supervisor-messages" class="message-list modal-messages"></div><form id="command-form"><textarea id="command-input" placeholder="例如：汇报当前出题进度，不要启动模型试跑。"></textarea><div class="modal-actions"><span id="command-result" class="form-hint">消息将排队等待上司读取，不代表已经执行。</span><button class="action-button primary" type="submit">加入消息队列</button></div></form></div></div>
+  <script src="/decisions.js?v=zh-native-questions-20261012"></script>
+  <script src="/app.js?v=zh-native-questions-20261012"></script>
 </body>
 </html>

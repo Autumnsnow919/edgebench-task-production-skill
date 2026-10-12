@@ -14,6 +14,11 @@ from urllib.parse import urlencode
 import topify_common as common
 
 SESSION_ID = re.compile(r"ses_[a-zA-Z0-9]{20,80}\Z")
+FORM_ID = re.compile(r"frm_[a-zA-Z0-9]+\Z")
+
+
+class FormSettledError(common.PipelineError):
+    """The native question was answered/cancelled elsewhere."""
 
 
 def _binary() -> str | None:
@@ -61,12 +66,21 @@ def _post(path: str, payload: dict, timeout: int = 30) -> dict:
     )
     if result.returncode != 0:
         raise common.PipelineError("OpenCode API message send failed")
+    # Native form reply returns HTTP 204: successful admission has no JSON body.
+    if not result.stdout.strip():
+        return {}
     try:
         value = json.loads(result.stdout.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise common.PipelineError("OpenCode API returned invalid message JSON") from exc
     if not isinstance(value, dict):
         raise common.PipelineError("OpenCode API message response is not an object")
+    if value.get("_tag") == "FormAlreadySettledError":
+        raise FormSettledError("问题已在其他界面处理，请刷新后查看。")
+    if value.get("_tag") in {"FormInvalidAnswerError", "InvalidRequestError"}:
+        raise common.PipelineError("回答不符合 OpenCode 问题规则，请核对选项和输入。")
+    if value.get("_tag"):
+        raise common.PipelineError("OpenCode 未接受操作，请检查会话和问题状态。")
     return value
 
 
@@ -205,3 +219,104 @@ def send_message(directory: str | Path, session_id: str, text: str) -> dict:
         raise common.PipelineError("OpenCode session message must be nonempty and at most 20000 characters")
     result = _post(f"/api/session/{session_id}/prompt", {"text": text.strip(), "resume": True})
     return {"status": "sent", "session_id": session_id, "response": result}
+
+
+def pending_forms(directory, extra_directories=(), session_id=None):
+    """Read native OpenCode questions; never invent choices from a ledger status."""
+    root = Path(directory).resolve(strict=True)
+    if session_id is not None:
+        _visible_session(root, session_id)
+        responses = [_get(f"/api/session/{session_id}/form")]
+    else:
+        directories = {root}
+        for value in extra_directories:
+            path = Path(value).resolve(strict=True)
+            if not path.is_relative_to(root):
+                raise common.PipelineError("问题目录超出批准的扫描范围。")
+            directories.add(path)
+        responses = [_get("/api/form?" + urlencode({"location[directory]": str(path)}))
+                     for path in sorted(directories)]
+    forms = []
+    seen = set()
+    for response in responses:
+        if response.get("_tag"):
+            raise common.PipelineError("无法读取 OpenCode 待回答问题。")
+        for form in response.get("data", []):
+            if not isinstance(form, dict) or form.get("id") in seen:
+                continue
+            if not isinstance(form.get("id"), str) or FORM_ID.fullmatch(form["id"]) is None:
+                raise common.PipelineError("OpenCode 返回了无效的问题编号。")
+            info = _visible_session(root, form.get("sessionID"))
+            fields = form.get("fields")
+            if not isinstance(fields, list):
+                raise common.PipelineError("OpenCode 返回了无效的问题字段。")
+            # Only expose the form contract, not arbitrary metadata/tool reasoning.
+            forms.append({"form_id": form["id"], "session_id": info["session_id"],
+                          "session_title": info["title"], "title": form.get("title", "待回答问题"),
+                          "fields": fields, "status": "pending", "source": "opencode-form"})
+            seen.add(form["id"])
+    return {"status": "ok", "forms": forms}
+
+
+def validate_form_answer(fields, answer):
+    if not isinstance(answer, dict) or len(answer) > 100:
+        raise common.PipelineError("回答必须是问题字段对应的对象。")
+    known = {field["key"] for field in fields if isinstance(field, dict) and "key" in field}
+    if set(answer) - known:
+        raise common.PipelineError("回答包含不属于该问题的字段。")
+    for field in fields:
+        key = field["key"]
+        enabled = not field.get("hidden", False)
+        for condition in field.get("when", []):
+            actual = answer.get(condition["key"])
+            enabled = enabled and (actual == condition["value"] if condition["op"] == "eq"
+                                   else actual != condition["value"])
+        if not enabled:
+            continue
+        value = answer.get(key)
+        if value is None:
+            if field.get("required"):
+                raise common.PipelineError(f"请回答：{field.get('title', key)}")
+            continue
+        kind = field["type"]
+        if kind == "string":
+            if not isinstance(value, str):
+                raise common.PipelineError("文本回答格式错误。")
+            if len(value) < field.get("minLength", 0) or len(value) > field.get("maxLength", 20_000):
+                raise common.PipelineError("文本回答长度不符合要求。")
+            if field.get("options") and not field.get("custom"):
+                if value not in {o["value"] for o in field["options"]}:
+                    raise common.PipelineError("该问题不允许自定义回答，请选择现有选项。")
+        elif kind == "multiselect":
+            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+                raise common.PipelineError("多选回答格式错误。")
+            if len(set(value)) != len(value) or not field.get("minItems", 0) <= len(value) <= field.get("maxItems", 100):
+                raise common.PipelineError("多选数量不符合要求。")
+            if not field.get("custom") and set(value) - {o["value"] for o in field["options"]}:
+                raise common.PipelineError("多选包含不允许的自定义内容。")
+        elif kind == "boolean":
+            if type(value) is not bool:
+                raise common.PipelineError("请选择是或否。")
+        elif kind in {"number", "integer"}:
+            if not common.finite_number(value) or (kind == "integer" and type(value) is not int):
+                raise common.PipelineError("数值回答格式错误。")
+            for bound, op in (("minimum", lambda a, b: a < b), ("maximum", lambda a, b: a > b)):
+                if common.finite_number(field.get(bound)) and op(value, field[bound]):
+                    raise common.PipelineError("数值不在允许范围内。")
+        else:
+            raise common.PipelineError("该字段需要在原 OpenCode 界面处理。")
+    common.canonical_sha256(answer)
+
+
+def reply_form(directory, session_id, form_id, answer):
+    _visible_session(directory, session_id)
+    if not isinstance(form_id, str) or FORM_ID.fullmatch(form_id) is None:
+        raise common.PipelineError("无效的 OpenCode 问题编号。")
+    form = _get(f"/api/session/{session_id}/form/{form_id}").get("data", {})
+    if form.get("id") != form_id or form.get("sessionID") != session_id:
+        raise common.PipelineError("问题不属于选中的会话。")
+    if form.get("state", {}).get("status") != "pending":
+        raise FormSettledError("问题已在其他界面处理，请刷新后查看。")
+    validate_form_answer(form.get("fields", []), answer)
+    _post(f"/api/session/{session_id}/form/{form_id}/reply", {"answer": answer})
+    return {"status": "answered", "form_id": form_id, "session_id": session_id}

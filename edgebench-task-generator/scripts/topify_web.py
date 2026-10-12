@@ -67,6 +67,8 @@ class SupervisorContext:
         self._opencode_snapshot = {"status": "not-queried", "sessions": [], "active_count": 0}
         self._employee_runtime_cache = {}
         self._runtime_lock = threading.Lock()
+        self._forms_at = 0.0
+        self._forms_snapshot = {"status": "ok", "forms": []}
         self.session_directory = Path(session_directory).resolve() if session_directory else self.root
 
     def describe(self) -> dict:
@@ -122,6 +124,22 @@ class SupervisorContext:
             "opencode_sessions": self._opencode_snapshot,
             **value,
         }
+
+    def questions(self, session_id=None, force=False):
+        if session_id:
+            return topify_opencode.pending_forms(self.session_directory, session_id=session_id)
+        now = time.monotonic()
+        with self._runtime_lock:
+            if force or now - self._forms_at >= 5:
+                directories = [e["job_root"] for e in topify_supervisor._employees(self.root)
+                               if e.get("session_id")]
+                try:
+                    self._forms_snapshot = topify_opencode.pending_forms(self.session_directory, directories)
+                except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+                    self._forms_snapshot = {"status": "unavailable", "forms": [],
+                                            "reason": "无法读取 OpenCode 待回答问题，请稍后刷新。"}
+                self._forms_at = now
+        return self._forms_snapshot
 
 
 class ConsoleState:
@@ -392,6 +410,14 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 result = topify_opencode.messages(context.session_directory, session_id)
                 self._respond(200, result)
                 return
+            if parsed.path == "/api/opencode-forms":
+                supervisor_id = self._query_supervisor_id()
+                auth = self._require(supervisor_id=supervisor_id)
+                context = self._context(auth, supervisor_id)
+                session_id = parse_qs(parsed.query).get("session_id", [None])[0]
+                result = context.questions(session_id)
+                self._respond(200, result)
+                return
             if parsed.path == "/api/employee-session":
                 supervisor_id = self._query_supervisor_id()
                 auth = self._require(supervisor_id=supervisor_id)
@@ -470,7 +496,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
 
     def _static(self, path: str) -> None:
         relative = "index.html" if path in {"", "/"} else path.removeprefix("/")
-        if "/" in relative or relative not in {"index.html", "app.js", "style.css"}:
+        if "/" in relative or relative not in {"index.html", "app.js", "decisions.js", "style.css"}:
             self._respond(404, {"error": "not found"})
             return
         source = WEB_ROOT / relative
@@ -481,6 +507,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         content_type = {
             "index.html": "text/html; charset=utf-8",
             "app.js": "text/javascript; charset=utf-8",
+            "decisions.js": "text/javascript; charset=utf-8",
             "style.css": "text/css; charset=utf-8",
         }[relative]
         self.send_response(200)
@@ -572,6 +599,17 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 )
                 self._respond(201, result)
                 return
+            if parsed.path == "/api/opencode-form-reply":
+                body = self._body()
+                auth = self._require("owner", body.get("supervisor_id"))
+                context = self._context(auth, body.get("supervisor_id"))
+                result = topify_opencode.reply_form(
+                    context.session_directory, body["session_id"],
+                    body["form_id"], body["answer"],
+                )
+                context.questions(force=True)
+                self._respond(200, result)
+                return
             if parsed.path == "/api/employee-session-message":
                 body = self._body()
                 auth = self._require(supervisor_id=body.get("supervisor_id"))
@@ -589,6 +627,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             self._respond(404, {"error": "not found"})
         except PermissionError:
             return
+        except topify_opencode.FormSettledError as exc:
+            self._respond(409, {"error": str(exc)})
         except (KeyError, common.PipelineError, OSError, ValueError, TypeError) as exc:
             self._respond(400, {"error": str(exc)})
 
