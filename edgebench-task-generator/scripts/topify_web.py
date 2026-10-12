@@ -534,6 +534,17 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 )
                 self._respond(200 if code == 0 else 409, {"role": auth[0], **result})
                 return
+            if parsed.path == "/api/owner-decision":
+                body = self._body()
+                auth = self._require("owner", body.get("supervisor_id"))
+                context = self._context(auth, body.get("supervisor_id"))
+                evidence = self._inside_campaign(body.get("evidence"), "evidence", context)
+                result, code = topify_supervisor.owner_decision(
+                    context.root, body["employee_id"], body["decision"],
+                    body["note"], evidence,
+                )
+                self._respond(200 if code == 0 else 409, result)
+                return
             if parsed.path == "/api/command":
                 self._require("owner")
                 body = self._body()
