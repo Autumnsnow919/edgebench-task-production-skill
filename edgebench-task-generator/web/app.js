@@ -49,7 +49,7 @@
     return employee.status || 'Waiting for dispatch';
   }
   function renderWorkspaces() {
-    $('supervisor-list').innerHTML = supervisors.map(item => `<button class="workspace-item ${item.supervisor_id === currentSupervisor ? 'active' : ''}" data-supervisor="${esc(item.supervisor_id)}"><span class="workspace-icon">${esc(item.benchmark.slice(0, 1))}</span><div><strong>${esc(item.workspace?.campaign_id || item.benchmark)}</strong><small>${esc(item.supervisor_id)} · ${esc(item.workspace?.lock_state || 'unlocked')}</small></div></button>`).join('');
+    $('supervisor-list').innerHTML = supervisors.map(item => `<button type="button" class="workspace-item ${item.supervisor_id === currentSupervisor ? 'active' : ''}" data-supervisor="${esc(item.supervisor_id)}"><span class="workspace-icon">${esc(item.benchmark.slice(0, 1))}</span><div><strong>${esc(item.workspace?.campaign_id || item.benchmark)}</strong><small>${esc(item.workspace?.target_task_count ?? '—')} tasks · ${esc(item.workspace?.lock_state || 'unlocked')}</small></div></button>`).join('');
     document.querySelectorAll('.workspace-item').forEach(button => button.addEventListener('click', () => switchSupervisor(button.dataset.supervisor)));
   }
   function renderDashboard(value) {
@@ -170,7 +170,7 @@
       document.querySelectorAll('.inspector-body').forEach(body => body.classList.toggle('hidden', body.id !== 'detail-chat'));
     } catch (error) { window.alert(error.message); }
   }
-  function switchSupervisor(id) { currentSupervisor = id; history.replaceState(null, '', `?supervisor_id=${encodeURIComponent(id)}`); renderWorkspaces(); $('inspector').classList.add('hidden'); if (stream) stream.close(); refresh(); connect(); }
+  async function switchSupervisor(id) { if (!id || id === currentSupervisor) return; currentSupervisor = id; history.replaceState(null, '', `?supervisor_id=${encodeURIComponent(id)}`); renderWorkspaces(); $('inspector').classList.add('hidden'); if (stream) stream.close(); $('connection').textContent = 'Loading workspace…'; await refresh(); connect(); }
   function connect() {
     if (!currentSupervisor) return;
     const query = new URLSearchParams({ supervisor_id: currentSupervisor });
