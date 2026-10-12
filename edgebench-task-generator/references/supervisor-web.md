@@ -30,15 +30,16 @@ recognizes only valid Topify campaign structures, creates a stamp, and marks it
 `legacy-adopted / needs_owner_review`; it does not silently treat arbitrary
 task directories as production supervisors.
 
-The service binds to every network interface, so external clients use the
-server's reachable IP and port 8787. Nginx/Caddy/TLS should still be placed in
-front for encrypted access; direct port 8787 is plain HTTP. The token files
-must be owner-only (`0600`);
+The service binds to every network interface, so LAN clients use the server's
+reachable IP and port 8787 directly. No reverse proxy is required for the
+trusted-LAN deployment in this work order; direct port 8787 is plain HTTP. The
+token files
 the service keeps their values stable across restarts.
 
 `--no-auth` is an explicit trusted-network mode. It grants owner authority to
 every client that can reach the port. Do not use it on an untrusted public
-network. To restore token authentication, omit `--no-auth` and supply
+network. If the service is later exposed outside the LAN, add a TLS proxy or
+restore token authentication by omitting `--no-auth` and supplying
 `--owner-token-file` / per-supervisor token files.
 
 If token files are omitted in single-campaign mode, the process generates

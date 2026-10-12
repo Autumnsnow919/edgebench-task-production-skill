@@ -106,8 +106,9 @@ python3 edgebench-task-generator/scripts/topify_pipeline.py \
 
 The service auto-discovers multiple separated Benchmark supervisors from
 `supervisor-stamp.json` files below the scan root and listens on all interfaces.
-Use the server IP and port 8787 for internal access; expose it through a TLS
-reverse proxy for encrypted access. Keep the token file at mode
+For the trusted-LAN deployment, use the server IP and port 8787 directly; no
+reverse proxy is required. If it is later exposed outside the LAN, add TLS or
+restore token authentication. Keep the token file at mode
 `0600` and run this command under systemd/supervisord for persistence. See
 `edgebench-task-generator/references/supervisor-web.md` for controls and API.
 
