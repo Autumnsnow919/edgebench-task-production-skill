@@ -148,7 +148,7 @@
   }
   function renderMessages(rows, id, empty) {
     const box = $(id); const wasBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
-    box.innerHTML = rows.map(m => `<div class="message-bubble ${m.type === 'user' || m.sender_type === 'owner' ? 'owner' : ''}"><div class="message-meta">${esc(label(m.sender_type || m.type))} ${esc(m.agent || m.sender_id || '')} · ${ago(m.created_at)}</div><p>${esc(m.text)}</p></div>`).join('') || `<div class="empty">${esc(empty)}</div>`;
+    box.innerHTML = rows.map(m => `<div class="message-bubble ${m.type === 'user' || m.sender_type === 'owner' ? 'owner' : ''} ${m.text?.startsWith('[工具调用') ? 'tool' : ''}"><div class="message-meta">${esc(label(m.sender_type || m.type))} ${esc(m.agent || m.sender_id || '')} · ${ago(m.created_at)}</div><p>${esc(m.text)}</p></div>`).join('') || `<div class="empty">${esc(empty)}</div>`;
     if (wasBottom) box.scrollTop = box.scrollHeight;
   }
   function openTab(tab) {
@@ -225,22 +225,10 @@
     for (const f of questions) window.OpenCodeDecisions.mount(box,f,submitNative);
     if (selection?.kind === 'employee') {
       const e=selection.employee;
-      const options=[{value:'request_supervisor',label:'请上司复核',description:'在台账中排队一个复核请求，不自动放行。'}];
-      if (e.status === 'rollout-pending') options.push({value:'approve_rollout',label:'批准模型试跑',description:'需满足 r2、独立质检、冻结和预算前提；不会自动启动进程。'}, {value:'reject_rollout',label:'拒绝本次试跑'});
-      if (['needs-owner-decision','repair-required','replacement-required'].includes(e.status)) options.push({value:'fire',label:'封存员工及子树',description:'逻辑封存；不会冒充已停止所有实际进程。'});
-      if (options.length > 1 || ['awaiting-approval','needs-owner-decision'].includes(e.status)) {
-        window.OpenCodeDecisions.mount(box, {form_id:`ledger-${e.employee_id}`,session_id:e.session_id || '未绑定',session_title:e.employee_id,title:'员工台账处理（不是原生提问）',fields:[
-          {key:'decision',type:'string',title:'选择处理方式',required:true,options,custom:false},
-          {key:'note',type:'string',title:'说明 / 自己的处理意见',required:true,minLength:1,maxLength:20000},
-        ]}, async (_form, answer) => {
-          if (answer.decision === 'request_supervisor') {
-            await api('/api/message',{method:'POST',body:JSON.stringify({supervisor_id:scope,target_type:'supervisor',target_id:scope,text:`请复核 ${e.employee_id}：${answer.note}`})});
-          } else {
-            await api('/api/owner-decision',{method:'POST',body:JSON.stringify({supervisor_id:scope,employee_id:e.employee_id,decision:answer.decision,note:answer.note})});
-          }
-          return {status:'recorded'};
-        });
-      }
+      const note = document.createElement('div');
+      note.className = 'ledger-question-note';
+      note.textContent = `这是员工台账状态（${label(e.status)}），不是 OpenCode 原生问题。需要负责人处理时，请使用页面右侧“需要你的决定”中的操作按钮；本区域不会伪造选择题。`;
+      box.append(note);
     }
   }
   async function refreshQuestions() {

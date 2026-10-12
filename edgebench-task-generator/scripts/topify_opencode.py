@@ -197,7 +197,22 @@ def messages(directory: str | Path, session_id: str, limit: int = 100) -> dict:
                 if content.get("type") == "text" and isinstance(content.get("text"), str):
                     parts.append(content["text"])
                 elif content.get("type") == "tool":
-                    parts.append(f"[tool: {content.get('name', 'unknown')}]")
+                    state = content.get("state", {}) if isinstance(content.get("state"), dict) else {}
+                    tool_input = state.get("input", {})
+                    if isinstance(tool_input, dict):
+                        input_text = " ".join(
+                            f"{key}={value}" for key, value in tool_input.items()
+                            if key in {"command", "path", "pattern", "url", "workdir"}
+                        )
+                    else:
+                        input_text = ""
+                    parts.append(f"[工具调用: {content.get('name', 'unknown')}{(' · ' + input_text) if input_text else ''}]")
+                    output = []
+                    for part in state.get("content", []) if isinstance(state.get("content"), list) else []:
+                        if isinstance(part, dict) and isinstance(part.get("text"), str):
+                            output.append(part["text"][:800])
+                    if output:
+                        parts.append("[工具输出]\n" + "\n".join(output))
             text = "\n".join(part for part in parts if part).strip()
             if text:
                 result.append({
