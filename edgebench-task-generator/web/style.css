@@ -43,4 +43,12 @@ button { cursor: pointer; }
 .modal-messages { max-height: 230px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: #f2f5f1; margin-bottom: 13px; }
 .dark-mode { --paper: #0d1412; --white: #131c19; --ink: #e8f0ea; --muted: #91a099; --line: #2a3832; --soft: #1d2a25; --shadow: 0 18px 55px rgba(0,0,0,.25); }.dark-mode .topbar { background: rgba(13,20,18,.88); }.dark-mode .metric, .dark-mode .agent-card, .dark-mode .panel-surface, .dark-mode .modal-card, .dark-mode .inspector-panel { background: var(--white); }.dark-mode .metric.accent-metric { background: #162a20; }.dark-mode input, .dark-mode .modal-card textarea { background: #0d1412; color: var(--ink); }.dark-mode .crumb strong, .dark-mode .command-shortcut, .dark-mode .select { color: var(--ink); background: var(--white); }.dark-mode .inspector-backdrop, .dark-mode .modal { background: rgba(0,0,0,.58); }
 @media (max-width: 940px) { .sidebar { width: 78px; flex-basis: 78px; padding-left: 10px; padding-right: 10px; }.brand { padding-left: 13px; }.brand div:last-child, .side-label, .workspace-item div, .sidebar-bottom { display: none; }.workspace-item { justify-content: center; padding: 10px; }.content, .topbar { padding-left: 24px; padding-right: 24px; }.lower-grid { grid-template-columns: 1fr; } }
+
+/* Workspace boundary: long campaign IDs must never paint into the main stage. */
+.sidebar { min-width: 0; overflow-x: hidden; overflow-y: auto; }
+.workspace-list { width: 100%; min-width: 0; overflow: hidden; }
+.workspace-item { width: 100%; min-width: 0; max-width: 100%; overflow: hidden; }
+.workspace-item > div { min-width: 0; max-width: 100%; overflow: hidden; }
+.workspace-item strong, .workspace-item small { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.main-stage { min-width: 0; max-width: calc(100vw - 244px); overflow-x: hidden; }
 @media (max-width: 650px) { .topbar { height: auto; padding-top: 18px; padding-bottom: 18px; align-items: flex-start; gap: 13px; flex-direction: column; }.top-actions { width: 100%; }.command-shortcut { flex: 1; text-align: left; }.content { padding: 30px 16px 50px; }.welcome-row { display: block; }.date-chip { margin-top: 20px; }.metric-row { grid-template-columns: 1fr 1fr; }.section-head { align-items: flex-start; gap: 15px; flex-direction: column; }.agent-grid { grid-template-columns: 1fr; }.inspector-panel { padding: 22px 18px; } }
