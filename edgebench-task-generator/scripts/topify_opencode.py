@@ -128,8 +128,9 @@ def messages(directory: str | Path, session_id: str, limit: int = 100) -> dict:
     # contain very large tool payloads; query them separately so one oversized
     # response does not make the whole inspector unusable.
     for message_type in ("user", "assistant"):
+        page_limit = min(limit, 20 if message_type == "user" else 3)
         try:
-            raw = _get(f"/api/session/{session_id}/message?limit={limit}&order=asc&type={message_type}")
+            raw = _get(f"/api/session/{session_id}/message?limit={page_limit}&order=desc&type={message_type}")
         except common.PipelineError as exc:
             partial.append(f"{message_type}: {exc}")
             continue
@@ -157,7 +158,8 @@ def messages(directory: str | Path, session_id: str, limit: int = 100) -> dict:
                 })
     result.sort(key=lambda item: item.get("created_at") or 0)
     return {"status": "partial" if partial else "ok", "session_id": session_id,
-            "messages": result, "limitations": partial}
+            "messages": result, "limitations": partial,
+            "note": "showing recent assistant messages and tool names"}
 
 
 def send_message(directory: str | Path, session_id: str, text: str) -> dict:
