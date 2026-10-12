@@ -84,6 +84,25 @@ def _post(path: str, payload: dict, timeout: int = 30) -> dict:
     return value
 
 
+def _delete(path: str, timeout: int = 30) -> None:
+    binary = _binary()
+    if not binary:
+        raise common.PipelineError("OpenCode CLI is unavailable")
+    result = subprocess.run(
+        [binary, "api", "delete", path], cwd="/", env=os.environ.copy(),
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout, check=False,
+    )
+    if result.returncode != 0:
+        raise common.PipelineError("OpenCode API delete failed")
+
+
+def cancel_form(session_id: str, form_id: str, message: str) -> None:
+    if not SESSION_ID.fullmatch(session_id) or not FORM_ID.fullmatch(form_id):
+        raise common.PipelineError("invalid OpenCode form identity")
+    from urllib.parse import quote
+    _delete(f"/api/session/{session_id}/form/{form_id}?message={quote(message)}")
+
+
 def sessions(directory: str | Path, limit: int = 200) -> dict:
     root = Path(directory).resolve(strict=True)
     if not root.is_dir() or root.is_symlink():

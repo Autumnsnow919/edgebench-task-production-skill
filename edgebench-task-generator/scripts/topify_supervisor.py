@@ -1337,7 +1337,18 @@ def create_owner_form(workspace: str | Path, employee_id: str, note: str = "") -
         raise common.PipelineError("该员工当前没有待负责人审批的台账状态")
     current_form = employee.get("owner_form")
     if current_form and current_form.get("status") == "pending":
-        return current_form, 0
+        existing = topify_opencode._get(
+            f"/api/session/{current_form['session_id']}/form/{current_form['form_id']}"
+        ).get("data", {})
+        note_field = next((field for field in existing.get("fields", []) if field.get("key") == "note"), None)
+        if note_field is not None and note_field.get("required") is False:
+            return current_form, 0
+        try:
+            topify_opencode.cancel_form(current_form["session_id"], current_form["form_id"],
+                                        "Superseded: acceptance note is optional.")
+        except (common.PipelineError, OSError, ValueError, TypeError):
+            pass
+        _save_employee(root, {**employee, "owner_form": {**current_form, "status": "superseded"}})
     options = [{"value": "accept_exception", "label": "接受例外", "description": "保留该员工并允许继续。"},
                {"value": "fire", "label": "淘汰员工子树", "description": "封存员工和子任务，后续换 Seed。"}]
     if employee.get("employment_status") in {"rollout-pending", "awaiting-approval"}:
@@ -1348,7 +1359,7 @@ def create_owner_form(workspace: str | Path, employee_id: str, note: str = "") -
         "metadata": {"edgebench": {"kind": "owner-decision", "employee_id": employee_id, "campaign": str(root)}},
         "fields": [
             {"key": "decision", "type": "string", "title": "请选择处理方式", "required": True, "options": options, "custom": False},
-            {"key": "note", "type": "string", "title": "处理说明", "description": note or "请写明决定原因。", "required": True, "minLength": 1, "maxLength": 20000},
+            {"key": "note", "type": "string", "title": "处理说明（批准/接受可留空）", "description": note or "批准/接受可以不填写；退回或淘汰时请说明理由。", "required": False, "minLength": 0, "maxLength": 20000},
         ],
     }
     result = topify_opencode._post(f"/api/session/{session_id}/form", payload)
@@ -1390,9 +1401,12 @@ def sync_owner_form(workspace: str | Path, employee_id: str) -> tuple[dict, int]
     if state.get("status") != "answered":
         return {"status": state.get("status", "unknown"), "form": form}, 0
     answer = state.get("answer", {})
-    if answer.get("decision") not in {"approve_rollout", "reject_rollout", "accept_exception", "fire"} or not _text(answer.get("note")):
+    if answer.get("decision") not in {"approve_rollout", "reject_rollout", "accept_exception", "fire"}:
         raise common.PipelineError("原生审批问题的回答不完整")
-    result, _ = owner_decision(root, employee_id, answer["decision"], answer["note"])
+    note = answer.get("note", "")
+    if answer["decision"] in {"reject_rollout", "fire"} and not _text(note):
+        raise common.PipelineError("退回或淘汰必须填写说明")
+    result, _ = owner_decision(root, employee_id, answer["decision"], note or "Owner approved without additional note.")
     _save_employee(root, {**_employee(root, employee_id), "owner_form": {**ref, "status": "synced", "synced_at": common.utc_now(), "answer": answer}})
     return {"status": "synced", "result": result}, 0
 
