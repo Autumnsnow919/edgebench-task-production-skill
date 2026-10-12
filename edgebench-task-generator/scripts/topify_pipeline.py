@@ -249,6 +249,9 @@ def parser() -> argparse.ArgumentParser:
     supervisor_init.add_argument("--dedup-root", type=Path)
     supervisor_init.add_argument("--supervisor-id")
     supervisor_init.add_argument("--benchmark")
+    supervisor_bind = commands.add_parser("supervisor-session-bind", help="bind the real supervisor OpenCode session")
+    supervisor_bind.add_argument("workspace", type=Path)
+    supervisor_bind.add_argument("--session-id", required=True)
     employee_hire = commands.add_parser("employee-hire", help="register one one-task production employee")
     employee_hire.add_argument("workspace", type=Path)
     employee_hire.add_argument("--employee-id", required=True)
@@ -364,6 +367,13 @@ def parser() -> argparse.ArgumentParser:
     owner_decision.add_argument("--decision", choices=("approve_rollout", "reject_rollout", "accept_exception", "fire"), required=True)
     owner_decision.add_argument("--note", required=True)
     owner_decision.add_argument("--evidence", type=Path)
+    owner_form_create = commands.add_parser("owner-form-create", help="create a native OpenCode owner question")
+    owner_form_create.add_argument("workspace", type=Path)
+    owner_form_create.add_argument("--employee-id", required=True)
+    owner_form_create.add_argument("--note", default="")
+    owner_form_sync = commands.add_parser("owner-form-sync", help="sync an answered native OpenCode owner question")
+    owner_form_sync.add_argument("workspace", type=Path)
+    owner_form_sync.add_argument("--employee-id", required=True)
     rollout_gate = commands.add_parser("supervisor-rollout-gate", help="evaluate profile-bound early rollout policy")
     rollout_gate.add_argument("workspace", type=Path)
     rollout_gate.add_argument("--employee-id", required=True)
@@ -702,6 +712,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.workspace, args.mode, args.max_concurrent, args.dedup_root,
                 args.supervisor_id, args.benchmark,
             )
+        elif args.command == "supervisor-session-bind":
+            report, code = topify_supervisor.bind_supervisor_session(
+                args.workspace, args.session_id)
         elif args.command == "employee-hire":
             report, code = topify_supervisor.hire(
                 args.workspace, args.employee_id, args.role, args.transport,
@@ -787,6 +800,12 @@ def main(argv: list[str] | None = None) -> int:
                 args.workspace, args.employee_id, args.decision,
                 args.note, args.evidence,
             )
+        elif args.command == "owner-form-create":
+            report, code = topify_supervisor.create_owner_form(
+                args.workspace, args.employee_id, args.note)
+        elif args.command == "owner-form-sync":
+            report, code = topify_supervisor.sync_owner_form(
+                args.workspace, args.employee_id)
         elif args.command == "supervisor-rollout-gate":
             report, code = topify_supervisor.rollout_gate(
                 args.workspace, args.employee_id, args.observations,

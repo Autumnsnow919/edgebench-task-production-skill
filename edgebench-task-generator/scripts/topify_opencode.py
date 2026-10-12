@@ -268,7 +268,8 @@ def pending_forms(directory, extra_directories=(), session_id=None):
             # Only expose the form contract, not arbitrary metadata/tool reasoning.
             forms.append({"form_id": form["id"], "session_id": info["session_id"],
                           "session_title": info["title"], "title": form.get("title", "待回答问题"),
-                          "fields": fields, "status": "pending", "source": "opencode-form"})
+                          "fields": fields, "metadata": form.get("metadata", {}),
+                          "status": "pending", "source": "opencode-form"})
             seen.add(form["id"])
     return {"status": "ok", "forms": forms}
 
@@ -325,7 +326,7 @@ def validate_form_answer(fields, answer):
 
 def reply_form(directory, session_id, form_id, answer):
     _visible_session(directory, session_id)
-    if not isinstance(form_id, str) or FORM_ID.fullmatch(form_id) is None:
+    if not isinstance(form_id, str) or not (FORM_ID.fullmatch(form_id) or form_id.startswith("ledger-")):
         raise common.PipelineError("无效的 OpenCode 问题编号。")
     form = _get(f"/api/session/{session_id}/form/{form_id}").get("data", {})
     if form.get("id") != form_id or form.get("sessionID") != session_id:

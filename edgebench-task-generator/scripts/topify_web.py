@@ -572,6 +572,24 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 )
                 self._respond(200 if code == 0 else 409, result)
                 return
+            if parsed.path == "/api/owner-form-create":
+                body = self._body()
+                auth = self._require("owner", body.get("supervisor_id"))
+                context = self._context(auth, body.get("supervisor_id"))
+                result, code = topify_supervisor.create_owner_form(
+                    context.root, body["employee_id"], body.get("note", "")
+                )
+                self._respond(201 if code == 0 else 409, result)
+                return
+            if parsed.path == "/api/owner-form-sync":
+                body = self._body()
+                auth = self._require("owner", body.get("supervisor_id"))
+                context = self._context(auth, body.get("supervisor_id"))
+                result, code = topify_supervisor.sync_owner_form_by_form(
+                    context.root, body["form_id"]
+                )
+                self._respond(200 if code == 0 else 409, result)
+                return
             if parsed.path == "/api/command":
                 self._require("owner")
                 body = self._body()

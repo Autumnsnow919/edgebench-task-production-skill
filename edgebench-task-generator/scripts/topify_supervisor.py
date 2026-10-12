@@ -16,6 +16,7 @@ import re
 import topify_common as common
 from topify_ledger_lock import mutation
 import topify_dedup
+import topify_opencode
 import topify_profile
 import topify_seed
 import topify_validate
@@ -302,6 +303,26 @@ def initialize(
     return {"status": "ready", "manifest": str(path), "stamp": str(stamp_path), **manifest}, 0
 
 
+@mutation
+def bind_supervisor_session(workspace: str | Path, session_id: str) -> tuple[dict, int]:
+    root, campaign = _root(workspace)
+    manifest = _load_manifest(root, campaign)
+    info = topify_opencode._visible_session(root.parent.parent.parent, session_id)
+    session_directory = Path(info["directory"]).resolve()
+    if not root.resolve().is_relative_to(session_directory):
+        raise common.PipelineError("supervisor session directory does not contain the campaign")
+    existing = manifest.get("supervisor_session_id")
+    if existing not in {None, session_id}:
+        raise common.PipelineError("campaign already has a different supervisor session")
+    updated = {**manifest, "supervisor_session_id": session_id,
+               "supervisor_session_directory": str(session_directory),
+               "supervisor_session_bound_at": common.utc_now()}
+    common.write_latest_json(root / "supervision/manifest.json", updated)
+    _append(root, "supervisor_session_bound", session_id=session_id,
+            directory=str(session_directory))
+    return updated, 0
+
+
 def _employees(root: Path) -> list[dict]:
     values = []
     for path in sorted((root / "supervision/employees").glob("*.json")):
@@ -569,6 +590,29 @@ def _report_summary(root: Path, employee: dict) -> dict | None:
     return value
 
 
+def _timeline(root: Path, employee_ids: set[str]) -> list[dict]:
+    path = root / "supervision/events.jsonl"
+    if not path.is_file() or path.is_symlink():
+        return []
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("employee_id") in employee_ids or event.get("producer_id") in employee_ids:
+            rows.append({
+                "event": event.get("event"),
+                "recorded_at": event.get("recorded_at"),
+                "status": event.get("status"),
+                "round": event.get("round"),
+                "dispatch_id": event.get("dispatch_id"),
+                "message_id": event.get("message_id"),
+                "decision": event.get("decision"),
+            })
+    return rows[-100:]
+
+
 def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     manifest = _load_manifest(root, campaign)
@@ -579,6 +623,9 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
     rows = []
     alerts = []
     for employee in values:
+        tree = _tree(root, employee["employee_id"])
+        tree_ids = {item["employee_id"] for item in tree}
+        children = [item for item in tree if item["employee_id"] != employee["employee_id"]]
         gate = _last_gate(root, employee["employee_id"])
         row = {
             "employee_id": employee["employee_id"],
@@ -597,6 +644,14 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
             "report": _report_summary(root, employee),
             "qc": employee.get("last_qc_decision"),
             "rollout_gate": gate,
+            "child_count": len(children),
+            "children": [
+                {"employee_id": child["employee_id"], "role": child.get("role"),
+                 "status": child.get("employment_status"), "session_id": child.get("session_id"),
+                 "phase": child.get("phase")}
+                for child in children
+            ],
+            "timeline": _timeline(root, tree_ids),
         }
         if employee.get("employment_status") in {
             "needs-owner-decision", "replacement-required", "repair-required",
@@ -614,7 +669,10 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
                 "status": gate.get("status"),
                 "action": gate.get("action"),
             })
-        rows.append(row)
+        # The Workforce view is one card per top-level employee. Child helpers
+        # remain in the parent card's timeline and are never duplicated as cards.
+        if employee.get("parent_id") == "supervisor":
+            rows.append(row)
     return {
         "schema_version": 1,
         "campaign": str(root),
@@ -1265,6 +1323,78 @@ def owner_decision(
     _append(root, "owner_decision_recorded", employee_id=employee_id,
             decision=decision, decision_sha256=receipt["decision_sha256"])
     return {"decision": receipt, "employee": employee_result}, 0
+
+
+@mutation
+def create_owner_form(workspace: str | Path, employee_id: str, note: str = "") -> tuple[dict, int]:
+    root, campaign = _root(workspace)
+    manifest = _load_manifest(root, campaign)
+    session_id = manifest.get("supervisor_session_id")
+    if not session_id:
+        raise common.PipelineError("先绑定该 campaign 的 supervisor OpenCode session")
+    employee = _employee(root, employee_id)
+    if employee.get("employment_status") not in {"rollout-pending", "awaiting-approval", "needs-owner-decision", "replacement-required", "repair-required"}:
+        raise common.PipelineError("该员工当前没有待负责人审批的台账状态")
+    current_form = employee.get("owner_form")
+    if current_form and current_form.get("status") == "pending":
+        return current_form, 0
+    options = [{"value": "accept_exception", "label": "接受例外", "description": "保留该员工并允许继续。"},
+               {"value": "fire", "label": "淘汰员工子树", "description": "封存员工和子任务，后续换 Seed。"}]
+    if employee.get("employment_status") in {"rollout-pending", "awaiting-approval"}:
+        options = [{"value": "approve_rollout", "label": "批准模型试跑", "description": "允许 producer 执行已批准的 rollout。"},
+                   {"value": "reject_rollout", "label": "退回本次试跑", "description": "不启动本次 rollout。"}, *options]
+    payload = {
+        "title": f"生产审批 · {employee_id}",
+        "metadata": {"edgebench": {"kind": "owner-decision", "employee_id": employee_id, "campaign": str(root)}},
+        "fields": [
+            {"key": "decision", "type": "string", "title": "请选择处理方式", "required": True, "options": options, "custom": False},
+            {"key": "note", "type": "string", "title": "处理说明", "description": note or "请写明决定原因。", "required": True, "minLength": 1, "maxLength": 20000},
+        ],
+    }
+    result = topify_opencode._post(f"/api/session/{session_id}/form", payload)
+    form = result.get("data", result)
+    if not isinstance(form, dict) or not form.get("id"):
+        raise common.PipelineError("OpenCode 未返回原生审批问题")
+    receipt = {"form_id": form["id"], "session_id": session_id, "employee_id": employee_id,
+               "created_at": common.utc_now(), "status": "pending", "form_sha256": common.canonical_sha256(form)}
+    number, attempt = common.next_attempt(root / "supervision/decisions" / employee_id)
+    receipt["attempt"] = number
+    common.write_new_json(attempt / "owner-form.json", receipt)
+    _save_employee(root, {**employee, "owner_form": receipt})
+    _append(root, "owner_form_created", employee_id=employee_id, form_id=form["id"], form_sha256=receipt["form_sha256"])
+    return {**receipt, "form": form}, 0
+
+
+@mutation
+def sync_owner_form_by_form(workspace: str | Path, form_id: str) -> tuple[dict, int]:
+    root, campaign = _root(workspace)
+    _load_manifest(root, campaign)
+    for employee in _employees(root):
+        if employee.get("owner_form", {}).get("form_id") == form_id:
+            return sync_owner_form(root, employee["employee_id"])
+    raise common.PipelineError("该原生问题没有绑定生产台账员工")
+
+
+@mutation
+def sync_owner_form(workspace: str | Path, employee_id: str) -> tuple[dict, int]:
+    root, campaign = _root(workspace)
+    _load_manifest(root, campaign)
+    employee = _employee(root, employee_id)
+    ref = employee.get("owner_form")
+    if not isinstance(ref, dict) or not ref.get("form_id"):
+        raise common.PipelineError("该员工没有原生审批问题")
+    form = topify_opencode._get(f"/api/session/{ref['session_id']}/form/{ref['form_id']}").get("data", {})
+    state = form.get("state", {})
+    if state.get("status") == "pending":
+        return {"status": "pending", "form": form}, 0
+    if state.get("status") != "answered":
+        return {"status": state.get("status", "unknown"), "form": form}, 0
+    answer = state.get("answer", {})
+    if answer.get("decision") not in {"approve_rollout", "reject_rollout", "accept_exception", "fire"} or not _text(answer.get("note")):
+        raise common.PipelineError("原生审批问题的回答不完整")
+    result, _ = owner_decision(root, employee_id, answer["decision"], answer["note"])
+    _save_employee(root, {**_employee(root, employee_id), "owner_form": {**ref, "status": "synced", "synced_at": common.utc_now(), "answer": answer}})
+    return {"status": "synced", "result": result}, 0
 
 
 def _metric(observations: dict, metric: str, entries: list[dict]) -> float | None:
