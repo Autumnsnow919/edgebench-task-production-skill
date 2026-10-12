@@ -92,7 +92,7 @@ python3 edgebench-task-generator/scripts/topify_pipeline.py \
   supervisor-web \
   --scan-root /var/lib/edgebench/campaigns \
   --host 0.0.0.0 --port 8787 \
-  --owner-token-file /etc/edgebench/owner.token
+  --no-auth
 ```
 
 The service auto-discovers multiple separated Benchmark supervisors from
@@ -101,6 +101,10 @@ Use the server IP and port 8787 for internal access; expose it through a TLS
 reverse proxy for encrypted access. Keep the token file at mode
 `0600` and run this command under systemd/supervisord for persistence. See
 `edgebench-task-generator/references/supervisor-web.md` for controls and API.
+
+The `--no-auth` mode is for a trusted private network: every reachable client
+can monitor and control the supervisors. Token authentication remains the
+default when the flag is omitted.
 
 Create a stamped supervisor with explicit identity when initializing a real
 campaign:

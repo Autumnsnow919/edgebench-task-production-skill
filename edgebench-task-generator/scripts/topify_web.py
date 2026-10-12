@@ -78,9 +78,11 @@ class ConsoleState:
         adopt_legacy: bool = False,
         dedup_root: str | Path | None = None,
         legacy_benchmark: str = "Unclassified",
+        auth_enabled: bool = True,
     ):
         self.tokens = {}
         self.contexts = {}
+        self.auth_enabled = auth_enabled
         self.scan_roots = list(scan_roots or [])
         self.adopt_legacy = adopt_legacy
         self.discovery_dedup_root = dedup_root
@@ -109,9 +111,12 @@ class ConsoleState:
             self.registry_file = None
             self.dedup_root = None
         self.owner_token = owner_token or _token()
-        self.tokens[_token_hash(self.owner_token)] = ("owner", None)
+        if self.auth_enabled:
+            self.tokens[_token_hash(self.owner_token)] = ("owner", None)
 
     def auth(self, value: str | None) -> tuple[str, str | None] | None:
+        if not self.auth_enabled:
+            return ("owner", None)
         if not value:
             return None
         return self.tokens.get(_token_hash(value))
@@ -454,14 +459,16 @@ def serve(
     adopt_legacy: bool = False,
     dedup_root: str | Path | None = None,
     legacy_benchmark: str = "Unclassified",
+    no_auth: bool = False,
 ) -> tuple[dict, int]:
     if type(port) is not int or not 1 <= port <= 65535:
         raise common.PipelineError("web port must be between 1 and 65535")
-    owner_token = owner_token or _read_token_file(owner_token_file, "owner_token_file")
-    supervisor_token = supervisor_token or _read_token_file(supervisor_token_file, "supervisor_token_file")
+    if not no_auth:
+        owner_token = owner_token or _read_token_file(owner_token_file, "owner_token_file")
+        supervisor_token = supervisor_token or _read_token_file(supervisor_token_file, "supervisor_token_file")
     state = ConsoleState(campaign, owner_token, supervisor_token,
                          owner_token_file, supervisor_token_file, registry_file, scan_roots,
-                         adopt_legacy, dedup_root, legacy_benchmark)
+                         adopt_legacy, dedup_root, legacy_benchmark, auth_enabled=not no_auth)
     server = ConsoleServer((host, port), state)
     report = {
         "status": "running",
@@ -471,10 +478,13 @@ def serve(
         "supervisors": state.supervisors(),
         "scan_roots": [str(item) for item in (scan_roots or [])],
         "warning": "Use any reachable server IP with this port; keep tokens private and protect the network path.",
+        "authentication": "disabled" if no_auth else "token",
     }
-    if registry_file is None and not scan_roots:
+    if not no_auth and registry_file is None and not scan_roots:
         report["owner_token"] = state.owner_token
         report["supervisor_token"] = state.supervisor_token
+    if no_auth:
+        report["warning"] = "NO AUTH: every client that can reach this port can monitor and control supervisors. Use only on a trusted private network."
     print(json.dumps(report, ensure_ascii=False, sort_keys=True), flush=True)
     try:
         server.serve_forever()

@@ -21,7 +21,7 @@ python3 edgebench-task-generator/scripts/topify_pipeline.py \
   supervisor-web \
   --scan-root /var/lib/edgebench/campaigns \
   --host 0.0.0.0 --port 8787 \
-  --owner-token-file /etc/edgebench/owner.token
+  --no-auth
 ```
 
 For older campaigns that predate the watermark protocol, add
@@ -35,6 +35,11 @@ server's reachable IP and port 8787. Nginx/Caddy/TLS should still be placed in
 front for encrypted access; direct port 8787 is plain HTTP. The token files
 must be owner-only (`0600`);
 the service keeps their values stable across restarts.
+
+`--no-auth` is an explicit trusted-network mode. It grants owner authority to
+every client that can reach the port. Do not use it on an untrusted public
+network. To restore token authentication, omit `--no-auth` and supply
+`--owner-token-file` / per-supervisor token files.
 
 If token files are omitted in single-campaign mode, the process generates
 separate owner and supervisor tokens and prints them once. Multi-supervisor

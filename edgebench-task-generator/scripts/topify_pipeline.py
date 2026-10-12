@@ -277,6 +277,7 @@ def parser() -> argparse.ArgumentParser:
     supervisor_web.add_argument("--adopt-legacy", action="store_true")
     supervisor_web.add_argument("--dedup-root", type=Path)
     supervisor_web.add_argument("--legacy-benchmark", default="Unclassified")
+    supervisor_web.add_argument("--no-auth", action="store_true")
     employee_fire = commands.add_parser("employee-fire", help="record a controlled employee termination")
     employee_fire.add_argument("workspace", type=Path)
     employee_fire.add_argument("--employee-id", required=True)
@@ -672,6 +673,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.supervisor_token, args.owner_token_file,
                 args.supervisor_token_file, args.registry_file, args.scan_root,
                 args.adopt_legacy, args.dedup_root, args.legacy_benchmark,
+                args.no_auth,
             )
         elif args.command == "employee-fire":
             report, code = topify_supervisor.fire(
