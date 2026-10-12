@@ -122,31 +122,42 @@ def messages(directory: str | Path, session_id: str, limit: int = 100) -> dict:
     _visible_session(directory, session_id)
     if type(limit) is not int or not 1 <= limit <= 300:
         raise common.PipelineError("OpenCode message limit must be between 1 and 300")
-    raw = _get(f"/api/session/{session_id}/message?limit={limit}&order=asc")
     result = []
-    for item in raw.get("data", []):
-        if not isinstance(item, dict):
+    partial = []
+    # User messages are compact and always readable. Assistant messages may
+    # contain very large tool payloads; query them separately so one oversized
+    # response does not make the whole inspector unusable.
+    for message_type in ("user", "assistant"):
+        try:
+            raw = _get(f"/api/session/{session_id}/message?limit={limit}&order=asc&type={message_type}")
+        except common.PipelineError as exc:
+            partial.append(f"{message_type}: {exc}")
             continue
-        parts = []
-        if isinstance(item.get("text"), str):
-            parts.append(item["text"])
-        for content in item.get("content", []):
-            if not isinstance(content, dict):
+        for item in raw.get("data", []):
+            if not isinstance(item, dict):
                 continue
-            if content.get("type") == "text" and isinstance(content.get("text"), str):
-                parts.append(content["text"])
-            elif content.get("type") == "tool":
-                parts.append(f"[tool: {content.get('name', 'unknown')}]")
-        text = "\n".join(part for part in parts if part).strip()
-        if text:
-            result.append({
-                "message_id": item.get("id"),
-                "type": item.get("type"),
-                "agent": item.get("agent"),
-                "text": text,
-                "created_at": item.get("time", {}).get("created"),
-            })
-    return {"status": "ok", "session_id": session_id, "messages": result}
+            parts = []
+            if isinstance(item.get("text"), str):
+                parts.append(item["text"])
+            for content in item.get("content", []):
+                if not isinstance(content, dict):
+                    continue
+                if content.get("type") == "text" and isinstance(content.get("text"), str):
+                    parts.append(content["text"])
+                elif content.get("type") == "tool":
+                    parts.append(f"[tool: {content.get('name', 'unknown')}]")
+            text = "\n".join(part for part in parts if part).strip()
+            if text:
+                result.append({
+                    "message_id": item.get("id"),
+                    "type": item.get("type", message_type),
+                    "agent": item.get("agent"),
+                    "text": text,
+                    "created_at": item.get("time", {}).get("created"),
+                })
+    result.sort(key=lambda item: item.get("created_at") or 0)
+    return {"status": "partial" if partial else "ok", "session_id": session_id,
+            "messages": result, "limitations": partial}
 
 
 def send_message(directory: str | Path, session_id: str, text: str) -> dict:

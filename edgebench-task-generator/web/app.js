@@ -49,7 +49,7 @@
     return employee.status || 'Waiting for dispatch';
   }
   function renderWorkspaces() {
-    $('supervisor-list').innerHTML = supervisors.map(item => `<button class="workspace-item ${item.supervisor_id === currentSupervisor ? 'active' : ''}" data-supervisor="${esc(item.supervisor_id)}"><span class="workspace-icon">${esc(item.benchmark.slice(0, 1))}</span><div><strong>${esc(item.benchmark)}</strong><small>${esc(item.supervisor_id)}</small></div></button>`).join('');
+    $('supervisor-list').innerHTML = supervisors.map(item => `<button class="workspace-item ${item.supervisor_id === currentSupervisor ? 'active' : ''}" data-supervisor="${esc(item.supervisor_id)}"><span class="workspace-icon">${esc(item.benchmark.slice(0, 1))}</span><div><strong>${esc(item.workspace?.campaign_id || item.benchmark)}</strong><small>${esc(item.supervisor_id)} · ${esc(item.workspace?.lock_state || 'unlocked')}</small></div></button>`).join('');
     document.querySelectorAll('.workspace-item').forEach(button => button.addEventListener('click', () => switchSupervisor(button.dataset.supervisor)));
   }
   function renderDashboard(value) {
@@ -62,9 +62,10 @@
     $('alert-note').textContent = value.alerts?.length ? 'owner decision required' : 'no active alerts';
     $('health').textContent = value.alerts?.some(x => x.status === 'INFRA_FAILURE') ? 'Review' : 'Good';
     $('updated').textContent = new Date().toLocaleTimeString();
-    $('workspace-title').textContent = value.benchmark || currentSupervisor || 'Workspace';
-    $('workspace-heading').textContent = `${value.benchmark || 'Your'} agents at work.`;
-    $('workspace-subtitle').textContent = `${employees.length} employees · live task state · profile-bound evidence`;
+    const workspace = value.workspace || {};
+    $('workspace-title').textContent = workspace.campaign_id || value.benchmark || currentSupervisor || 'Workspace';
+    $('workspace-heading').textContent = `${value.benchmark || 'Your'} production floor.`;
+    $('workspace-subtitle').textContent = `${employees.length} employees · target ${workspace.target_task_count ?? '—'} · profile ${workspace.profile_id || 'not locked'} · ${workspace.delivery_format || 'format pending'} · ${workspace.lock_state || 'unlocked'}`;
     $('side-status').textContent = `${employees.length} visible employees`;
     renderSessions(value.opencode_sessions || {});
     const visibleEmployees = filterMode === 'attention'
@@ -73,7 +74,7 @@
         ? employees.filter(employee => !['fired', 'complete'].includes(employee.status))
         : employees;
     $('agent-grid').classList.toggle('timeline-mode', viewMode === 'timeline');
-    $('agent-grid').innerHTML = visibleEmployees.length ? visibleEmployees.map(renderAgentCard).join('') : '<div class="empty">No agents match this view.</div>';
+    $('agent-grid').innerHTML = visibleEmployees.length ? visibleEmployees.map(renderAgentCard).join('') : '<div class="empty">No producer/QC employees in this workspace yet. OpenCode sessions above are runtime sessions, not employee records.</div>';
     document.querySelectorAll('.inspect-agent').forEach(button => button.addEventListener('click', () => showInspector(button.dataset.id)));
     renderAlerts(value.alerts || []);
   }
@@ -84,7 +85,7 @@
       $('session-grid').innerHTML = `<div class="empty">OpenCode session adapter unavailable: ${esc(snapshot.reason || 'unknown error')}</div>`;
       return;
     }
-    $('session-summary').textContent = `${snapshot.active_count || 0} running · ${sessions.length} visible`;
+    $('session-summary').textContent = `Global runtime · ${snapshot.active_count || 0} running · ${sessions.length} visible`;
     $('session-grid').innerHTML = sessions.length ? sessions.map(session => `<article class="session-card ${session.status === 'running' ? 'running' : ''} inspect-session" data-session-id="${esc(session.session_id)}"><i class="session-dot"></i><div><strong>${esc(session.title)}</strong><small>${esc(session.agent || 'agent')} · ${esc(session.session_id)}${session.parent_id ? ` · child of ${esc(session.parent_id)}` : ''}</small></div><span class="session-badge">${esc(session.status)}</span></article>`).join('') : '<div class="empty">No OpenCode sessions found for this workspace.</div>';
     document.querySelectorAll('.inspect-session').forEach(card => card.addEventListener('click', () => showOpenCodeSession(card.dataset.sessionId)));
   }
