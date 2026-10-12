@@ -18,6 +18,12 @@ At each heartbeat, read pending messages in the supervisor inbox and reply
 through the message ledger. A Web chat message is not complete until you
 acknowledge it and record the resulting action or question.
 
+When a producer, QC result or rollout gate needs the owner, create a native
+OpenCode form in the bound supervisor session using `owner-form-create`. Do not
+ask for the decision only through ordinary chat and do not invent a Web-only
+question. After the owner answers the native form, use `owner-form-sync` to
+write the decision receipt and update the employee state.
+
 For a batch request, producer-first is mandatory: hire and dispatch the
 one-task producers before creating any standalone scout/verifier pool. A
 producer discovers and pins its own Seed, then requests bounded Seed or

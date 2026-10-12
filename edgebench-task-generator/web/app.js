@@ -224,43 +224,9 @@
     $('detail-question-status').textContent = questions.length ? `${questions.length} 个原生问题待回答` : '此会话暂无原生待回答问题；不会从员工状态伪造审批选项。';
     for (const f of questions) window.OpenCodeDecisions.mount(box,f,submitNative);
     if (selection?.kind === 'employee') {
-      const e=selection.employee;
       const note = document.createElement('div');
       note.className = 'ledger-question-note';
-      const title = document.createElement('h3');
-      title.textContent = '生产台账操作';
-      const description = document.createElement('p');
-      description.textContent = `当前状态：${label(e.status)}。这是生产台账决定，不是 OpenCode 原生问题。`;
-      note.append(title, description);
-      const actions = document.createElement('div');
-      actions.className = 'ledger-actions';
-      const decisions = e.status === 'rollout-pending' || e.status === 'awaiting-approval'
-        ? [['approve_rollout','批准模型试跑','允许 producer 执行已冻结 rollout'],['reject_rollout','退回本次试跑','不启动本次 rollout']]
-        : e.status === 'needs-owner-decision'
-          ? [['accept_exception','接受例外','保留员工并继续流程'],['fire','封存员工子树','封存并换 Seed']]
-          : e.status === 'replacement-required' || e.status === 'repair-required'
-            ? [['fire','确认封存并换 Seed','封存员工及其子任务']] : [];
-      for (const [decision, text, hint] of decisions) {
-        const button = document.createElement('button');
-        button.type = 'button'; button.className = `action-button ${decision === 'fire' || decision === 'reject_rollout' ? 'danger' : 'primary'}`;
-        button.textContent = text; button.title = hint;
-        button.addEventListener('click', async () => {
-          const reason = window.prompt(`${text}\n\n${hint}\n\n请输入处理说明：`);
-          if (!reason) return;
-          button.disabled = true;
-          try {
-            await api('/api/owner-decision', {method:'POST', body:JSON.stringify({
-              supervisor_id:scope, employee_id:e.employee_id, decision, note:reason,
-            })});
-            note.classList.add('decision-complete');
-            description.textContent = `已记录：${text}`;
-            actions.replaceChildren(); await refresh();
-          } catch (error) { description.textContent = `操作失败：${error.message}`; button.disabled = false; }
-        });
-        actions.append(button);
-      }
-      if (decisions.length) note.append(actions);
-      else description.textContent += ' 当前没有可执行的负责人决定。';
+      note.textContent = `员工台账状态：${label(selection.employee.status)}。这里只显示 OpenCode 原生问题；审批选项必须由上司会话创建，不在这里伪造。`;
       box.append(note);
     }
   }

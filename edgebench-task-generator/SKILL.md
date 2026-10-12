@@ -54,6 +54,11 @@ employee table plus only actionable alerts. Use the OpenCode child-session
 result or Orca `worker-show`/`worker-read` only for the named employee; the
 supervisor should not flood the owner with every raw transcript.
 
+Owner decisions are native to the supervisor's bound OpenCode session: create a
+form with `owner-form-create`, let the owner choose its real fields/options,
+then sync it with `owner-form-sync`. Do not manufacture a form in the Web UI or
+send an approval choice as ordinary chat.
+
 When several Benchmarks are active, use the supervisor registry and keep one
 campaign/evidence tree per supervisor. The shared dedup root is the only
 cross-supervisor index: it stores fingerprints and frozen task hashes, not

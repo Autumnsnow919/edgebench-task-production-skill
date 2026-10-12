@@ -33,6 +33,11 @@ heartbeat and reply in that same target conversation with `employee-message`
 receipt exists. A worker can send a separate supervisor-targeted message for
 escalation.
 
+For a production gate, the supervisor must bind its actual OpenCode session and
+create an owner form with `owner-form-create`; the Web merely mirrors that
+native form. `owner-form-sync` verifies the native answer and writes the ledger
+decision. A Web-only synthetic approval is not valid evidence.
+
 ## Authority model
 
 ```text
