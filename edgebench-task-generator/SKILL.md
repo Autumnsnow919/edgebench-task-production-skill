@@ -86,6 +86,15 @@ The production Web console may discover these supervisors from approved scan
 roots. Only a validated `supervision/supervisor-stamp.json` is a recognized
 watermark; arbitrary folders and process names are never auto-enrolled.
 
+Bound employees communicate upward through two mechanisms: their
+`employee-report` heartbeat/completion reports are delivered to the actual
+Supervisor OpenCode session, and the resident Web watchdog detects a missing
+heartbeat or idle bound session after five minutes and sends a consolidated
+watchdog alert to that session. The alert is observational: it never fires or
+replaces an employee. The Supervisor must inspect, contact/resume or escalate
+the worker and record what happened. The Workforce card exposes
+`healthy`/`heartbeat-missed`/`stalled` instead of trusting `employment_status`.
+
 If the owner requests a browser dashboard, read
 `references/supervisor-web.md` and start `supervisor-web` with authentication.
 The Web console is another view/control plane over the ledger, not a second

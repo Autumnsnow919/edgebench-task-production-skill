@@ -278,6 +278,9 @@ def parser() -> argparse.ArgumentParser:
     supervisor_dashboard = commands.add_parser("supervisor-dashboard", help="show chat-friendly worker progress and alerts")
     supervisor_dashboard.add_argument("workspace", type=Path)
     supervisor_dashboard.add_argument("--employee-id")
+    supervisor_watch = commands.add_parser("supervisor-watch", help="detect stale worker heartbeats and notify the bound supervisor")
+    supervisor_watch.add_argument("workspace", type=Path)
+    supervisor_watch.add_argument("--stale-after-seconds", type=int, default=topify_supervisor.HEARTBEAT_STALE_AFTER_SECONDS)
     supervisor_web = commands.add_parser("supervisor-web", help="serve the authenticated supervisor web console")
     supervisor_web.add_argument("workspace", type=Path, nargs="?")
     supervisor_web.add_argument("--host", default="0.0.0.0")
@@ -735,6 +738,8 @@ def main(argv: list[str] | None = None) -> int:
             report, code = topify_supervisor.status(args.workspace)
         elif args.command == "supervisor-dashboard":
             report, code = topify_supervisor.dashboard(args.workspace, args.employee_id)
+        elif args.command == "supervisor-watch":
+            report, code = topify_supervisor.watch(args.workspace, args.stale_after_seconds)
         elif args.command == "supervisor-web":
             report, code = topify_web.serve(
                 args.workspace, args.host, args.port, args.owner_token,

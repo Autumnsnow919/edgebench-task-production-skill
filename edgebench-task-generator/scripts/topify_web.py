@@ -108,6 +108,9 @@ class SupervisorContext:
                     runtime = topify_opencode.employee_runtime(employee, active)
                     self._employee_runtime_cache[key] = (now, runtime)
                 employee["runtime"] = self._employee_runtime_cache[key][1]
+                employee["health"] = topify_supervisor.employee_health(
+                    employee, employee["runtime"]
+                )
             binding = value["supervisor_binding"]
             cached = self._supervisor_runtime_cache
             if cached is None or cached[1] != binding or now - cached[0] >= 5:
@@ -115,6 +118,17 @@ class SupervisorContext:
                 runtime = topify_opencode.supervisor_runtime(self.session_directory, self.root, manifest, active)
                 self._supervisor_runtime_cache = (time.monotonic(), binding, runtime)
             value["supervisor_runtime"] = self._supervisor_runtime_cache[2]
+            for employee in value["employees"]:
+                health = employee.get("health") or {}
+                if health.get("attention"):
+                    value["alerts"].append({
+                        "kind": "employee-watch",
+                        "employee_id": employee["employee_id"],
+                        "status": health.get("status"),
+                        "responsible": "supervisor",
+                        "health": health,
+                        "report": employee.get("report"),
+                    })
         value["workforce"] = {
             "registered": len(value["employees"]),
             "runtime_running": sum(e["runtime"]["status"] == "running" for e in value["employees"]),
@@ -376,6 +390,25 @@ class ConsoleState:
             "alerts": [alert for row in rows for alert in row.get("alerts", [])],
             "employees": [employee for row in rows for employee in row.get("employees", [])],
         }
+
+    def watch_tick(self) -> list[dict]:
+        """Run the non-destructive worker-watch loop for every campaign."""
+        self.refresh_discovery()
+        snapshots = self.runtime_snapshot()
+        if snapshots.get("status") != "ok":
+            return [{"status": "runtime-unavailable", "reason": "没有可信运行时快照；不推断员工已停止。"}]
+        active = {}
+        if snapshots.get("status") == "ok":
+            active = {session_id: {"type": "running"}
+                      for session_id in snapshots.get("active_session_ids", [])}
+        results = []
+        for context in list(self.contexts.values()):
+            try:
+                value, _ = topify_supervisor.watch(context.root, active=active)
+                results.append({"supervisor_id": context.supervisor_id, **value})
+            except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
+                results.append({"supervisor_id": context.supervisor_id, "status": "watch-error", "reason": str(exc)})
+        return results
 
 
 def _json_bytes(value: object) -> bytes:
@@ -817,6 +850,15 @@ def serve(
                          owner_token_file, supervisor_token_file, registry_file, scan_roots,
                          adopt_legacy, dedup_root, legacy_benchmark, auth_enabled=not no_auth)
     server = ConsoleServer((host, port), state)
+    watch_stop = threading.Event()
+    def watch_loop() -> None:
+        # The Web service is also the resident observation process. This loop
+        # only sends evidence-backed alerts to the bound Supervisor; it never
+        # fires, resumes or kills a worker.
+        while not watch_stop.wait(15.0):
+            state.watch_tick()
+    watch_thread = threading.Thread(target=watch_loop, name="edgebench-worker-watch", daemon=True)
+    watch_thread.start()
     report = {
         "status": "running",
         "bind": f"{host}:{port}",
@@ -838,5 +880,7 @@ def serve(
     except KeyboardInterrupt:
         return {**report, "status": "stopped"}, 0
     finally:
+        watch_stop.set()
+        watch_thread.join(timeout=5)
         server.server_close()
     return report, 0

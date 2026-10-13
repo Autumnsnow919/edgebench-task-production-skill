@@ -21,3 +21,9 @@ exception, fund more repair/review or terminate. Preserve the original findings.
 Read the QC message inbox at each heartbeat and reply in the same employee
 conversation with a structured finding or question. Keep the reply linked to
 the incoming message ID.
+
+Send a heartbeat at least every 120 seconds while auditing and immediately
+when a QC report is complete or blocked. Include the report path/hash, round,
+finding status and exact next action. A completed QC report must be delivered
+to the Supervisor; it is not a substitute for Supervisor acknowledgment or an
+owner decision.

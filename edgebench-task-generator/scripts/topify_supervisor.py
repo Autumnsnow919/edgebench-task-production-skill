@@ -9,6 +9,7 @@ OpenCode prompt API. Merely reading this ledger never starts or stops an agent.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import re
@@ -44,6 +45,11 @@ QC_STATES = frozenset({"pass", "repair_required", "fail", "pass_with_exception"}
 QC_SEVERITIES = frozenset({"info", "minor", "major", "critical"})
 QC_DECISIONS = frozenset({"fire", "accept_exception", "continue_repair", "request_user"})
 QC_OWNER_CHOICES = {"accept_exception": "接受指定例外", "continue_repair": "继续返修复检", "fire": "淘汰员工子树"}
+HEARTBEAT_STALE_AFTER_SECONDS = 300
+HEARTBEAT_DELIVERY_INTERVAL_SECONDS = 120
+WORKER_MONITORED_STATES = frozenset({
+    "active", "running", "dispatch-created", "repair-required", "rollout-running",
+})
 GATE_STATES = frozenset({
     "CONTINUE", "ACCEPT", "EARLY_TOO_EASY", "INFRA_FAILURE",
     "EVIDENCE_INCOMPLETE", "FINAL_POLICY_REVIEW", "FINAL_POLICY_FAIL",
@@ -57,6 +63,59 @@ INFRA_SIGNALS = frozenset({
 
 def _text(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _age_seconds(value: object, now: float | None = None) -> float | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        stamp = datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError, OverflowError):
+        return None
+    current = now if now is not None else datetime.now(timezone.utc).timestamp()
+    return max(0.0, current - stamp)
+
+
+def employee_health(employee: dict, runtime: dict | None = None,
+                    now: float | None = None,
+                    stale_after: int = HEARTBEAT_STALE_AFTER_SECONDS) -> dict:
+    """Classify liveness from receipts plus the real bound OpenCode session.
+
+    A ledger state is not a heartbeat. This is observational only: it never
+    fires, resumes or kills an employee.
+    """
+    status = employee.get("employment_status", employee.get("status"))
+    if status in {"fired", "complete"}:
+        return {"status": "inactive", "attention": False, "age_seconds": None,
+                "reason": "员工已结束，不再等待心跳。"}
+    if status not in WORKER_MONITORED_STATES:
+        return {"status": "waiting", "attention": False, "age_seconds": None,
+                "reason": "当前阶段由上司/负责人处理，不要求员工继续发送心跳。"}
+    runtime = runtime or {}
+    report = employee.get("last_report") or employee.get("report") or {}
+    recorded_at = report.get("recorded_at")
+    if not recorded_at:
+        binding = employee.get("session_binding") or {}
+        recorded_at = binding.get("bound_at") or employee.get("hired_at")
+    age = _age_seconds(recorded_at, now)
+    session_status = runtime.get("status")
+    if not employee.get("session_id"):
+        if status in WORKER_MONITORED_STATES:
+            return {"status": "unbound", "attention": True, "age_seconds": age,
+                    "last_report_at": recorded_at,
+                    "reason": "工作单存在但没有绑定实际员工会话。"}
+        return {"status": "waiting", "attention": False, "age_seconds": age,
+                "last_report_at": recorded_at, "reason": "当前阶段不要求员工运行。"}
+    if age is None or age > stale_after:
+        kind = "stalled" if session_status in {"idle", "interrupted", "failed", "unavailable"} else "heartbeat-missed"
+        return {"status": kind, "attention": True, "age_seconds": age,
+                "last_report_at": recorded_at, "session_status": session_status,
+                "last_report_status": report.get("report_status", report.get("status")),
+                "reason": "实际会话已空闲/不可用且没有新心跳。" if kind == "stalled"
+                          else "实际会话可能仍运行，但员工超过心跳期限未汇报。"}
+    return {"status": "healthy", "attention": False, "age_seconds": age,
+            "last_report_at": recorded_at, "session_status": session_status,
+            "last_report_status": report.get("report_status", report.get("status")), "reason": "最近有员工报告。"}
 
 
 def _id(value: object, label: str = "identifier") -> str:
@@ -500,6 +559,62 @@ def record_qc_owner_answer(workspace: str | Path, producer_id: str, decision: st
     raise common.PipelineError("未找到实际 question 工具对当前 QC 凭证和该选项的完成回答；不能用聊天猜测或上司自己的说明批准。")
 
 
+def _deliver_to_supervisor(root: Path, text: str, sender_type: str,
+                           sender_id: str, subject: str = "", message: dict | None = None) -> dict:
+    """Deliver subordinate/watchdog input to the bound real Supervisor session."""
+    manifest = common.load_json(root / "supervision/manifest.json")
+    session_directory = manifest.get("supervisor_session_directory")
+    if not session_directory or not manifest.get("supervisor_session_id"):
+        return {"status": "unavailable", "reason": "没有绑定实际上司会话。"}
+    runtime = topify_opencode.supervisor_runtime(session_directory, root, manifest)
+    if not runtime.get("can_chat"):
+        return {"status": "unavailable", "session_id": runtime.get("session_id"),
+                "reason": runtime.get("reason", "无法核验上司会话。")}
+    if message is None:
+        message, _ = _persist_message(root, "supervisor", manifest["supervisor_id"], text,
+                                     sender_type=sender_type, sender_id=sender_id)
+    prompt = (
+        f"{sender_type} update from {sender_id}; ledger message {message['message_id']}.\n"
+        f"Campaign: {root}\nSubject: {subject or 'production update'}\n"
+        "This is an actual subordinate/watchdog communication delivered to your bound session. "
+        "Acknowledge it in this session, inspect the named employee/session and take the next lawful action. "
+        "Use supervisor-directive to send a real response into the employee's bound session, not only a ledger file. "
+        "For watchdog incidents record supervisor-ack with the incident key and action/evidence; admission is not acknowledgment. "
+        "If an owner question currently blocks you, retain that question and report waiting-owner, never invent its answer. "
+        "Do not infer completion from a ledger write. Do not automatically fire a stalled employee; "
+        "contact/resume/inspect it or escalate a concrete owner question. Preserve QC and technical gates.\n\n"
+        + text
+    )
+    try:
+        admitted = topify_opencode.send_message(session_directory, runtime["session_id"], prompt)
+    except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
+        _append(root, "supervisor_delivery_failed", message_id=message["message_id"],
+                sender_type=sender_type, sender_id=sender_id,
+                session_id=runtime["session_id"], status="unconfirmed")
+        return {"status": "unconfirmed", "message_id": message["message_id"],
+                "session_id": runtime["session_id"], "reason": str(exc)}
+    data = admitted.get("response", {}).get("data", {})
+    receipt = {
+        "schema_version": 1, "status": "admitted", "message_id": message["message_id"],
+        "session_id": runtime["session_id"], "sender_type": sender_type,
+        "sender_id": sender_id, "inbox_id": data.get("id"),
+        "recorded_at": common.utc_now(), "execution_status": "awaiting-agent-action",
+    }
+    receipt["delivery_sha256"] = common.canonical_sha256(receipt)
+    _, attempt = common.next_attempt(root / "supervision/session-deliveries")
+    common.write_new_json(attempt / "delivery.json", receipt)
+    _append(root, "supervisor_update_delivered", **receipt)
+    return receipt
+
+
+def _should_deliver_report(employee: dict, report_status: str, now: float) -> bool:
+    if report_status != "heartbeat":
+        return True
+    previous = employee.get("last_supervisor_delivery") or {}
+    age = _age_seconds(previous.get("recorded_at"), now)
+    return age is None or age >= HEARTBEAT_DELIVERY_INTERVAL_SECONDS
+
+
 @mutation
 def send_supervisor_message(workspace: str | Path, text: str) -> tuple[dict, int]:
     """Admit owner input to the bound *real* session; never claim execution."""
@@ -701,10 +816,16 @@ def _employment_prompt(root: Path, manifest: dict, employee: dict) -> str:
             "Retain this employee identity and this same OpenCode session (or Orca worker) across "
             "Seed discovery, r0, r1, r2, QC repairs, approved rollout and packaging preparation. "
             "Record stage-complete checkpoints, not terminal employee completion. "
-            "After measured r0 the supervisor says 'too simple'; after r1 it requires a second distinct "
-            "causal mechanism. Use new version workspaces and parent hashes; only r2 may enter QC. "
-            "QC is independent. No rollout without current freeze and supervisor/owner authorization. "
-            "After freeze never change scoring identity. Read Web inbox messages at checkpoints and "
+                "After measured r0 the supervisor says 'too simple'; after r1 it requires a second distinct "
+                "causal mechanism. Use new version workspaces and parent hashes; only r2 may enter QC. "
+                "QC is independent. No rollout without current freeze and supervisor/owner authorization. "
+                "While active, send a heartbeat at least every 120 seconds and before/after a long tool batch. "
+                f"Write a JSON report under {employee['job_root']}/heartbeat.json with employee_id, status=heartbeat, "
+                "summary, stage, revision_index and current_action/blocker, then run "
+                f"`python3 {bundle / 'edgebench-task-generator/scripts/topify_pipeline.py'} employee-report {root} "
+                f"--employee-id {employee['employee_id']} --input {employee['job_root']}/heartbeat.json`. "
+                "A report is an active communication to the bound Supervisor; do not silently stop or leave only a completed receipt. "
+                "After freeze never change scoring identity. Read Web inbox messages at checkpoints and "
             "reply in your own conversation. Return actual paths, hashes, status and blockers, "
             "never prose-only completion.\n"
         )
@@ -1219,16 +1340,113 @@ def report(workspace: str | Path, employee_id: str, report_file: str | Path) -> 
     if _unresolved_qc_failure(employee, second_round_only=True):
         # A heartbeat or another r2 completion is not the owner's decision.
         state = "needs-owner-decision"
-    _save_employee(root, {
+    updated_employee = {
         **employee,
         "employment_status": state,
         "last_report": receipt,
         **({"hardening_revision": revision, "phase": "authoring" if revision < 2 else "qc-review"}
            if candidate_complete else {"phase": "seed-review"} if seed_proposal else {}),
-    })
+    }
+    delivery = None
+    if _should_deliver_report(employee, status_value, datetime.now(timezone.utc).timestamp()):
+        delivery_text = (
+            f"Employee {employee_id} report: status={status_value}, phase={updated_employee.get('phase')}, "
+            f"revision={revision}, report_sha256={receipt['report_sha256']}.\n"
+            f"Report path: {receipt['report_path']}\n"
+            f"Summary: {value.get('summary') or 'heartbeat; no summary provided'}\n"
+            "This is a subordinate checkpoint. Acknowledge it, update the stage plan or ask the employee for a blocker. "
+            "Do not treat a completed report as terminal employee completion; preserve the same employee/session."
+        )
+        delivery = _deliver_to_supervisor(root, delivery_text, "employee", employee_id,
+                                          subject=f"employee-report:{employee_id}")
+        updated_employee["last_supervisor_delivery"] = delivery
+    _save_employee(root, updated_employee)
     _append(root, "employee_reported", employee_id=employee_id, report_status=status_value,
-            report_sha256=receipt["report_sha256"])
-    return receipt, 0
+            report_sha256=receipt["report_sha256"],
+            supervisor_delivery_status=delivery.get("status") if delivery else "throttled")
+    return {**receipt, "supervisor_delivery": delivery}, 0
+
+
+@mutation
+def watch(workspace: str | Path, stale_after_seconds: int = HEARTBEAT_STALE_AFTER_SECONDS,
+          active: dict | None = None) -> tuple[dict, int]:
+    """Detect silent/stopped bound workers and notify the real Supervisor.
+
+    This is an observation/escalation loop. It never fires, resumes or kills a
+    worker. A stable incident key prevents repeated identical alerts until the
+    worker emits a new report or its runtime condition changes.
+    """
+    root, campaign = _root(workspace)
+    manifest = _load_manifest(root, campaign)
+    if type(stale_after_seconds) is not int or stale_after_seconds < 30:
+        raise common.PipelineError("stale_after_seconds must be at least 30 seconds")
+    if active is None:
+        try:
+            active = topify_opencode._get("/api/session/active").get("data", {})
+        except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
+            return {"status": "runtime-unavailable", "reason": str(exc), "incidents": []}, 2
+    if not isinstance(active, dict):
+        active = {}
+    incidents = []
+    watch_root = root / "supervision/watch"
+    watch_root.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc).timestamp()
+    for employee in _employees(root):
+        if employee.get("employment_status") not in WORKER_MONITORED_STATES:
+            continue
+        runtime = topify_opencode.employee_runtime(employee, active)
+        health = employee_health(employee, runtime, now, stale_after_seconds)
+        if not health.get("attention"):
+            continue
+        report = employee.get("last_report") or {}
+        incident_key = common.canonical_sha256({
+            "employee_id": employee["employee_id"],
+            "session_id": employee.get("session_id"),
+            "health": health["status"],
+            "report_sha256": report.get("report_sha256"),
+        })
+        pointer = watch_root / f"{employee['employee_id']}.json"
+        previous = common.load_json(pointer) if pointer.is_file() and not pointer.is_symlink() else {}
+        if previous.get("incident_key") == incident_key and previous.get("status") == "admitted":
+            continue
+        incident = {
+            "schema_version": 1, "incident_key": incident_key,
+            "employee_id": employee["employee_id"], "parent_id": employee.get("parent_id"),
+            "employment_status": employee.get("employment_status"),
+            "phase": employee.get("phase"), "session_id": employee.get("session_id"),
+            "runtime": runtime, "health": health,
+            "last_report": report, "detected_at": common.utc_now(),
+            "status": "detected", "automatic_fire_allowed": False,
+        }
+        common.write_latest_json(pointer, incident)
+        incidents.append(incident)
+    if not incidents:
+        return {"status": "ok", "incident_count": 0, "incidents": []}, 0
+    lines = [
+        "Worker watchdog detected employees that stopped reporting or have no bound session.",
+        "This is an escalation, not a fire command. Inspect the actual session and contact/resume the worker; "
+        "do not terminate from this alert.",
+    ]
+    for incident in incidents:
+        health = incident["health"]
+        lines.append(
+            f"- {incident['employee_id']} parent={incident.get('parent_id')} phase={incident.get('phase')} "
+            f"health={health['status']} runtime={health.get('session_status')} "
+            f"age_seconds={health.get('age_seconds')} last_report={health.get('last_report_at')} "
+            f"report_sha256={(incident.get('last_report') or {}).get('report_sha256')} "
+            f"reason={health.get('reason')}"
+        )
+    delivery = _deliver_to_supervisor(root, "\n".join(lines), "watchdog", "supervisor-watchdog",
+                                      subject="stalled-worker-watch")
+    for incident in incidents:
+        incident["status"] = delivery.get("status", "unavailable")
+        incident["delivery"] = delivery
+        common.write_latest_json(watch_root / f"{incident['employee_id']}.json", incident)
+        _append(root, "employee_watch_alert", employee_id=incident["employee_id"],
+                incident_key=incident["incident_key"], health=incident["health"]["status"],
+                delivery_status=delivery.get("status"), automatic_fire_allowed=False)
+    return {"status": delivery.get("status", "unavailable"), "incident_count": len(incidents),
+            "incidents": incidents, "delivery": delivery}, 0 if delivery.get("status") == "admitted" else 2
 
 
 def _message_target(root: Path, target_type: str, target_id: str) -> Path:
@@ -1243,7 +1461,7 @@ def _message_target(root: Path, target_type: str, target_id: str) -> Path:
 
 
 @mutation
-def send_message(
+def _persist_message(
     workspace: str | Path,
     target_type: str,
     target_id: str,
@@ -1254,7 +1472,7 @@ def send_message(
 ) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     _load_manifest(root, campaign)
-    if sender_type not in {"owner", "supervisor", "employee"}:
+    if sender_type not in {"owner", "supervisor", "employee", "watchdog"}:
         raise common.PipelineError("message sender_type is invalid")
     if not _text(text) or len(text) > 20_000:
         raise common.PipelineError("message text must be nonempty and at most 20000 characters")
@@ -1292,6 +1510,49 @@ def send_message(
             sender_type=sender_type, sender_id=sender_id,
             message_sha256=message["message_sha256"])
     return message, 0
+
+
+@mutation
+def send_message(
+    workspace: str | Path, target_type: str, target_id: str, text: str,
+    sender_type: str = "owner", sender_id: str = "owner", reply_to: str | None = None,
+) -> tuple[dict, int]:
+    root, campaign = _root(workspace)
+    manifest = _load_manifest(root, campaign)
+    if sender_type == "employee":
+        employee = _employee(root, sender_id)
+        if employee.get("employment_status") == "fired":
+            raise common.PipelineError("a fired employee cannot resume communication")
+    message, code = _persist_message(root, target_type, target_id, text, sender_type, sender_id, reply_to)
+    if target_type == "supervisor" and sender_type == "employee":
+        delivery = _deliver_to_supervisor(root, text, sender_type, sender_id,
+                                          subject=f"employee-message:{sender_id}", message=message)
+        return {**message, "supervisor_delivery": delivery}, code
+    if target_type == "employee" and sender_type == "supervisor":
+        employee = _employee(root, target_id)
+        runtime = topify_opencode.employee_runtime(employee)
+        if not runtime.get("can_chat"):
+            delivery = {"status": "unavailable", "session_id": runtime.get("session_id"),
+                        "reason": runtime.get("reason", "员工实际会话不可用。")}
+        else:
+            try:
+                admitted = topify_opencode.send_message(
+                    employee["job_root"], runtime["session_id"],
+                    f"Supervisor directive from {sender_id}; ledger message {message['message_id']}.\n"
+                    "Acknowledge this directive in your actual session, report what you did and send the next heartbeat.\n\n"
+                    + text
+                )
+                delivery = {"status": "admitted", "session_id": runtime["session_id"],
+                            "inbox_id": admitted["response"]["data"]["id"],
+                            "execution_status": "awaiting-agent-action"}
+            except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
+                delivery = {"status": "unconfirmed", "session_id": runtime.get("session_id"),
+                            "reason": str(exc)}
+        _append(root, "supervisor_employee_directive", employee_id=target_id,
+                message_id=message["message_id"], delivery_status=delivery["status"],
+                session_id=delivery.get("session_id"))
+        return {**message, "employee_delivery": delivery}, code
+    return message, code
 
 
 def list_messages(

@@ -65,6 +65,14 @@ The resolution requires the owner's real native-question answer receipt bound
 to the current QC hash; a supervisor note is not owner authorization. See
 `edgebench-task-generator/references/supervisor-protocol.md` for Web/TUI mapping.
 
+Bound employees communicate upward through `employee-report` heartbeat and
+completion receipts. The resident Web watchdog checks the real bound session
+and the last report; after five minutes without a report it sends a deduplicated
+`heartbeat-missed`/`stalled` alert to the actual Supervisor session. It never
+fires or kills a worker. The Supervisor must inspect/contact/resume or escalate
+the employee and record the action; a ledger `running` state is not proof of
+life.
+
 ## Chat-first dispatch
 
 When the owner says “派发出题下属”, “启动一批题目”, “create producers”, or

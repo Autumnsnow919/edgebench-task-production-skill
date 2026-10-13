@@ -14,6 +14,8 @@
     'waiting-qc':'待质检', 'unbound':'未绑定', 'unsupported':'未适配', 'unavailable':'不可用',
     'binding-mismatch':'绑定不匹配', 'unknown':'未知', 'ok':'正常', 'partial':'部分加载',
     'pending':'待回答', 'answered':'已回答', 'cancelled':'已取消',
+    'healthy':'心跳正常', 'heartbeat-missed':'心跳超时', 'stalled':'疑似停工',
+    'waiting':'等待阶段',
     'succeeded':'已完成', 'failed':'失败', 'interrupted':'已中断',
     'pass':'通过', 'fail':'不通过', 'repair_required':'待修复', 'pass_with_exception':'有例外待审批',
     'heartbeat':'心跳', 'completed':'阶段完成', 'blocked':'阻塞', 'question':'提问',
@@ -28,7 +30,7 @@
     'edgebench-qc':'质检员', 'edgebench-supervisor':'上司', 'edgebench-scout':'来源搜索员',
     'edgebench-seed-worker':'种子子任务', 'edgebench-seed-verifier':'种子核验员',
     'edgebench-prototype-worker':'原型子任务', 'edgebench-rollout':'试跑观察员', 'build':'主会话',
-    'owner':'你', 'supervisor':'上司', 'employee':'员工', 'user':'你', 'assistant':'智能体',
+    'owner':'你', 'supervisor':'上司', 'employee':'员工', 'watchdog':'监控告警', 'user':'你', 'assistant':'智能体',
     'opencode-task':'OpenCode 会话', 'orca-cli':'Orca 编排',
     'employee-state':'员工事项', 'rollout-gate':'试跑检查',
     'incomplete':'证据未完成', 'not-classified':'尚未区分失败与未验证',
@@ -143,7 +145,8 @@
     $('agent-grid').innerHTML = list.map(e => {
       const bad = e.status === 'fired' || e.status === 'failed';
       const warn = ['needs-owner-decision','replacement-required','repair-required'].includes(e.status);
-      return `<article class="agent-card" style="--card-tint:${bad ? '#fbe7e5' : warn ? '#fff0d9' : '#e3f3e9'}"><div class="card-top"><div class="agent-identity"><span class="agent-avatar">${esc(label(e.role).slice(0,1))}</span><div><strong title="${esc(e.employee_id)}">${esc(e.employee_id)}</strong><small>${esc(label(e.role))} · ${esc(label(e.transport))}</small></div></div><span title="${esc(e.status)}" class="card-status ${bad ? 'bad' : warn ? 'warn' : ''}"><i></i>${esc(label(e.status))}</span></div><div class="card-body"><div class="card-action">当前 <b>${esc(action(e))}</b></div><small>阶段：${esc(label(e.phase))} · 会话：${esc(label(e.runtime?.status))}</small>${stageMarkup(e)}</div><div class="card-footer"><span title="${esc(e.session_id || '')}">${esc(e.session_id || e.seed_id || '未绑定会话')}</span><button type="button" data-employee="${esc(e.employee_id)}">查看详情 →</button></div></article>`;
+      const healthWarn = e.health?.attention;
+      return `<article class="agent-card" style="--card-tint:${bad ? '#fbe7e5' : healthWarn || warn ? '#fff0d9' : '#e3f3e9'}"><div class="card-top"><div class="agent-identity"><span class="agent-avatar">${esc(label(e.role).slice(0,1))}</span><div><strong title="${esc(e.employee_id)}">${esc(e.employee_id)}</strong><small>${esc(label(e.role))} · ${esc(label(e.transport))}</small></div></div><span title="${esc(e.status)}" class="card-status ${bad ? 'bad' : healthWarn || warn ? 'warn' : ''}"><i></i>${esc(label(e.status))}</span></div><div class="card-body"><div class="card-action">当前 <b>${esc(action(e))}</b></div><small>阶段：${esc(label(e.phase))} · 会话：${esc(label(e.runtime?.status))} · ${esc(label(e.health?.status))}</small>${e.health?.attention ? `<p class="health-warning">${esc(e.health.reason)} · 最后报告 ${esc(ago(e.health.last_report_at))}</p>` : ''}${stageMarkup(e)}</div><div class="card-footer"><span title="${esc(e.session_id || '')}">${esc(e.session_id || e.seed_id || '未绑定会话')}</span><button type="button" data-employee="${esc(e.employee_id)}">查看详情 →</button></div></article>`;
     }).join('') || '<div class="empty">当前筛选没有员工；临时 OpenCode 会话不会自动成为出题员工。</div>';
     $('agent-grid').querySelectorAll('[data-employee]').forEach(b => b.addEventListener('click', () => showEmployee(b.dataset.employee)));
   }
@@ -156,7 +159,7 @@
   function renderAlerts() {
     const alerts = data?.alerts || [];
     const seen = new Set();
-    $('alerts').innerHTML = alerts.filter(a => {const key=`${a.employee_id}:${a.status}`; if(seen.has(key)) return false; seen.add(key); return true;}).map(a => `<div class="attention-item"><strong>${esc(a.employee_id)} · ${a.owner_review ? `QC-${esc(a.owner_review.round)} 仍未通过，等你复核` : esc(label(a.status))}</strong><small>${esc(a.owner_review?.summary || a.report?.summary || data.employees?.find(e => e.employee_id === a.employee_id)?.report?.summary || '阶段报告待上司处理；没有实际提问时不需要你填写审批。')}</small>${a.owner_review ? '<p class="form-hint">保留员工和证据，不自动淘汰。请核对具体缺陷与缺失凭证。</p>' : ''}<div class="alert-actions"><button type="button" class="alert-action" data-review="${esc(a.employee_id)}">${a.owner_review ? '查看不合格项与证据' : '查看报告'}</button><button type="button" class="alert-action" data-supervisor-review="${esc(a.employee_id)}" ${data.supervisor_runtime?.can_chat ? '' : 'disabled'}>${a.owner_review ? '让上司说明并提请决定' : '请上司处理'}</button></div></div>`).join('') || '<div class="empty">当前没有台账待处理事项。</div>';
+    $('alerts').innerHTML = alerts.filter(a => {const key=`${a.employee_id}:${a.status}:${a.kind}`; if(seen.has(key)) return false; seen.add(key); return true;}).map(a => `<div class="attention-item"><strong>${esc(a.employee_id)} · ${a.owner_review ? `QC-${esc(a.owner_review.round)} 仍未通过，等你复核` : a.kind === 'employee-watch' ? `员工${esc(label(a.status))}` : esc(label(a.status))}</strong><small>${esc(a.owner_review?.summary || (a.kind === 'employee-watch' ? a.health?.reason : null) || a.report?.summary || data.employees?.find(e => e.employee_id === a.employee_id)?.report?.summary || '阶段报告待上司处理；没有实际提问时不需要你填写审批。')}</small>${a.kind === 'employee-watch' ? '<p class="form-hint">这是停工/失联告警，先让上司核查和联系员工，不自动淘汰。</p>' : ''}${a.owner_review ? '<p class="form-hint">保留员工和证据，不自动淘汰。请核对具体缺陷与缺失凭证。</p>' : ''}<div class="alert-actions"><button type="button" class="alert-action" data-review="${esc(a.employee_id)}">${a.owner_review ? '查看不合格项与证据' : '查看报告'}</button><button type="button" class="alert-action" data-supervisor-review="${esc(a.employee_id)}" ${data.supervisor_runtime?.can_chat ? '' : 'disabled'}>${a.owner_review ? '让上司说明并提请决定' : '请上司处理'}</button></div></div>`).join('') || '<div class="empty">当前没有台账待处理事项。</div>';
     $('alerts').querySelectorAll('[data-review]').forEach(b => b.addEventListener('click', () => showEmployee(b.dataset.review)));
     $('alerts').querySelectorAll('[data-supervisor-review]').forEach(b => b.addEventListener('click', () => requestSupervisorReview(b.dataset.supervisorReview, b)));
   }
@@ -215,7 +218,7 @@
       selection.employee = employee; selection.sessionId = employee.session_id;
       $('detail-title').textContent = id; $('detail-role').textContent = `${label(employee.role)} · ${label(employee.transport)}`;
       $('detail-avatar').textContent = label(employee.role).slice(0,1); $('detail-status').textContent = label(employee.status);
-      $('detail-state').innerHTML = `<h3>当前状态</h3><p>${esc(action(employee))}</p><p>阶段：${esc(label(employee.phase))}<br>实际会话：${esc(employee.session_id || '未绑定')}<br>会话状态：${esc(label(employee.runtime?.status))}<br>上级：${esc(label(employee.parent_id))}<br>独占目录：${esc(employee.job_root)}</p>${stageMarkup(employee)}`;
+      $('detail-state').innerHTML = `<h3>当前状态</h3><p>${esc(action(employee))}</p><p>阶段：${esc(label(employee.phase))}<br>实际会话：${esc(employee.session_id || '未绑定')}<br>会话状态：${esc(label(employee.runtime?.status))}<br>心跳：${esc(label(employee.health?.status))}<br>上级：${esc(label(employee.parent_id))}<br>独占目录：${esc(employee.job_root)}</p>${employee.health?.attention ? `<p class="health-warning">${esc(employee.health.reason)}<br>最后报告：${esc(ago(employee.health.last_report_at))}</p>` : ''}${stageMarkup(employee)}`;
       $('detail-evidence').innerHTML = `<h3>当前证据</h3><p>质检：${esc(label(employee.qc?.decision))}<br>模型试跑：${esc(label(employee.rollout_gate?.status))}<br>最近报告：${esc(label(employee.report?.status))}</p>${qcReviewMarkup(employee.qc_owner_review)}`;
       $('detail-json').textContent = JSON.stringify(employee,null,2); $('detail-log').textContent = employee.report?.summary || '暂无员工报告。';
       $('dispatch-worker').hidden = false; $('fire-worker').hidden = false;

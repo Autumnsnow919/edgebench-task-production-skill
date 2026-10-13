@@ -80,6 +80,8 @@ interfaces does not bypass firewall or network ACLs.
 - detail panel with QC and rollout gate evidence;
 - SSE updates every two seconds;
 - focused worker selection instead of dumping every transcript.
+- employee heartbeat health and watchdog alerts delivered to the actual
+  Supervisor; stalled workers are not automatically terminated.
 
 ## Controls
 

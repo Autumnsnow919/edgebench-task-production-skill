@@ -33,6 +33,18 @@ interrupted until an explicit owner message/review request resumes it. Reading
 the dashboard or creating a ledger object never wakes an agent. Employee
 ledger inboxes remain a separate durable channel; worker replies need receipts.
 
+### Employee-to-supervisor liveness
+
+An employee must write a heartbeat report at least every 120 seconds while
+active, before/after long tool batches and at stage transitions. `employee-report`
+delivers the report to the bound Supervisor session and retains an admission
+receipt. The resident Web watch loop checks the real bound session plus the last
+report; after 300 seconds without a report it sends one deduplicated
+`heartbeat-missed`/`stalled` alert to the Supervisor. It never changes the
+employee to fired or kills a process. The Supervisor inspects the actual
+session, contacts/resumes the employee or escalates a concrete owner question.
+`running` in the ledger without a fresh report is not proof of life.
+
 For a true owner gate, the supervisor calls the native `question` TOOL and
 waits. Web reply validates the form's tool message/ID and running tool state,
 then submits the answer to that tool. The same agent resumes, uses the answer

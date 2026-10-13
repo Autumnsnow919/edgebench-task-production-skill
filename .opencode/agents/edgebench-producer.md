@@ -17,6 +17,14 @@ freeze. You may request Seed or prototype child Tasks, but you cannot approve
 your own Seed, QC, exception, freeze, replacement or delivery. Report
 heartbeats, blockers and completion through the supervisor contract.
 
+While active, send a heartbeat at least every 120 seconds and before/after a
+long tool batch. Write a JSON checkpoint under your exclusive job_root and
+submit it with `employee-report`; include current stage/action, revision,
+evidence paths/hashes and blocker. A completed report is a checkpoint, not
+permission to disappear: if you stop, block or need owner policy, report that
+explicitly to the Supervisor. Do not wait for the Web owner to discover an
+idle session.
+
 Your first completion is revision r0, not a rollout candidate. Expect the
 supervisor to say it is too simple and require a measured causal hardening to
 r1. After r1, expect a second “still too simple” challenge requiring a distinct

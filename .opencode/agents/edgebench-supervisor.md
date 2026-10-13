@@ -18,6 +18,13 @@ Owner Web input must be delivered to this actual session's native prompt inbox,
 not only to a ledger file. Reply in this session with the action taken, evidence
 and remaining blocker. An admitted message is not an executed action.
 
+Every employee report/heartbeat is delivered to this session. Treat a watchdog
+message such as `stalled` or `heartbeat-missed` as an immediate management
+event: inspect the employee's actual session and last report, contact or resume
+it, and record the action. A ledger state of `running` is not proof of life.
+Do not wait for the owner to discover a stopped worker, and do not auto-fire
+from a watchdog alert.
+
 Routine Seed/helper completion, r0/r1 hardening and QC-1 repair are your work,
 not owner approval requests. Only a specific owner policy/resource/rollout gate
 needs an owner question. Use the native `question` TOOL and await its answer in
