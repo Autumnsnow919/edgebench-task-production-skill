@@ -70,6 +70,8 @@ class SupervisorContext:
         self._forms_at = 0.0
         self._forms_snapshot = {"status": "ok", "forms": []}
         self._forms_cache = {}
+        self._supervisor_runtime_cache = None
+        self._forms_lock = threading.Lock()
         self.session_directory = Path(session_directory).resolve() if session_directory else self.root
 
     def describe(self) -> dict:
@@ -106,6 +108,13 @@ class SupervisorContext:
                     runtime = topify_opencode.employee_runtime(employee, active)
                     self._employee_runtime_cache[key] = (now, runtime)
                 employee["runtime"] = self._employee_runtime_cache[key][1]
+            binding = value["supervisor_binding"]
+            cached = self._supervisor_runtime_cache
+            if cached is None or cached[1] != binding or now - cached[0] >= 5:
+                manifest = common.load_json(self.root / "supervision/manifest.json")
+                runtime = topify_opencode.supervisor_runtime(self.session_directory, self.root, manifest, active)
+                self._supervisor_runtime_cache = (time.monotonic(), binding, runtime)
+            value["supervisor_runtime"] = self._supervisor_runtime_cache[2]
         value["workforce"] = {
             "registered": len(value["employees"]),
             "runtime_running": sum(e["runtime"]["status"] == "running" for e in value["employees"]),
@@ -124,19 +133,26 @@ class SupervisorContext:
         }
 
     def questions(self, session_id=None, employee_id=None, force=False):
+        employees = topify_supervisor._employees(self.root)
+        manifest = common.load_json(self.root / "supervision/manifest.json")
+        supervisor_session = manifest.get("supervisor_session_id")
+        bound_sessions = {e["session_id"] for e in employees if e.get("session_id")}
+        if supervisor_session:
+            bound_sessions.add(supervisor_session)
         if session_id:
+            # Global Runtime inspection can read another approved session;
+            # never advertise it as this campaign's production question.
             return topify_opencode.pending_forms(self.session_directory, session_id=session_id)
         now = time.monotonic()
         cache_key = ("employee", employee_id) if employee_id else ("global",)
-        with self._runtime_lock:
+        with self._forms_lock:
             cached = self._forms_cache.get(cache_key)
             if not force and cached is not None and now - cached[0] < 5:
                 return cached[1]
             try:
                 if employee_id:
                     employee = topify_supervisor._employee(self.root, employee_id)
-                    manifest = common.load_json(self.root / "supervision/manifest.json")
-                    session_ids = [manifest.get("supervisor_session_id"), employee.get("session_id")]
+                    session_ids = [supervisor_session, employee.get("session_id")]
                     snapshot = topify_opencode.pending_forms_for_sessions(
                         self.session_directory, session_ids
                     )
@@ -146,13 +162,38 @@ class SupervisorContext:
                     # lazily when their employee is opened; scanning every
                     # worktree on each page refresh made the console slow.
                     snapshot = topify_opencode.pending_forms(self.session_directory)
+                    snapshot["forms"] = [form for form in snapshot["forms"] if form["session_id"] in bound_sessions]
             except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired):
                 snapshot = {"status": "unavailable", "forms": [],
                              "reason": "无法读取 OpenCode 待回答问题，请稍后刷新。"}
-            self._forms_cache[cache_key] = (now, snapshot)
+            self._forms_cache[cache_key] = (time.monotonic(), snapshot)
             self._forms_snapshot = snapshot
             self._forms_at = now
             return snapshot
+
+    def require_bound_session(self, session_id: str) -> None:
+        manifest = common.load_json(self.root / "supervision/manifest.json")
+        sessions = {manifest.get("supervisor_session_id")}
+        sessions.update(e.get("session_id") for e in topify_supervisor._employees(self.root))
+        if not session_id or session_id not in sessions:
+            raise common.PipelineError("此会话未绑定本 campaign，不能通过生产控制台提交决定。")
+
+    def record_native_reply(self, result: dict, answer: dict) -> dict:
+        directory = self.root / "supervision/native-interactions" / result["form_id"]
+        number, attempt = common.next_attempt(directory)
+        receipt = {
+            "schema_version": 1, "form_id": result["form_id"], "session_id": result["session_id"],
+            "consumer": result["consumer"], "answer": answer, "status": "answered",
+            "execution_status": "awaiting-agent-action", "recorded_at": common.utc_now(),
+        }
+        receipt["reply_sha256"] = common.canonical_sha256(receipt)
+        common.write_new_json(attempt / "reply.json", receipt)
+        topify_supervisor._append(self.root, "native_question_answered", form_id=result["form_id"],
+                                  session_id=result["session_id"], reply_sha256=receipt["reply_sha256"],
+                                  execution_status="awaiting-agent-action")
+        with self._forms_lock:
+            self._forms_cache.clear()
+        return receipt
 
 
 class ConsoleState:
@@ -453,6 +494,18 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 )
                 self._respond(200, {"supervisor_id": context.supervisor_id, "messages": messages})
                 return
+            if parsed.path == "/api/supervisor-session":
+                supervisor_id = self._query_supervisor_id()
+                auth = self._require(supervisor_id=supervisor_id)
+                context = self._context(auth, supervisor_id)
+                manifest = common.load_json(context.root / "supervision/manifest.json")
+                runtime = topify_opencode.supervisor_runtime(context.session_directory, context.root, manifest)
+                if not runtime.get("can_chat"):
+                    self._respond(409, {"error": runtime.get("reason"), "runtime": runtime})
+                    return
+                result = topify_opencode.messages(context.session_directory, runtime["session_id"])
+                self._respond(200, {**result, "runtime": runtime})
+                return
             if parsed.path == "/api/opencode-session":
                 supervisor_id = self._query_supervisor_id()
                 auth = self._require(supervisor_id=supervisor_id)
@@ -489,7 +542,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             self._static(parsed.path)
         except PermissionError:
             return
-        except (common.PipelineError, OSError, ValueError, TypeError) as exc:
+        except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
             self._respond(400, {"error": str(exc)})
 
     def _events(self, context: SupervisorContext) -> list[dict]:
@@ -616,23 +669,17 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/owner-decision":
                 body = self._body()
-                auth = self._require("owner", body.get("supervisor_id"))
-                context = self._context(auth, body.get("supervisor_id"))
-                evidence = self._inside_campaign(body.get("evidence"), "evidence", context)
-                result, code = topify_supervisor.owner_decision(
-                    context.root, body["employee_id"], body["decision"],
-                    body["note"], evidence,
-                )
-                self._respond(200 if code == 0 else 409, result)
+                self._require("owner", body.get("supervisor_id"))
+                self._respond(409, {"error": "不能用 Web 通用按钮代替上司的实际决策执行。请联系绑定上司；原生 question 答案由其继续处理。"})
                 return
-            if parsed.path == "/api/owner-form-create":
+            if parsed.path in {"/api/supervisor-review", "/api/owner-form-create"}:
                 body = self._body()
                 auth = self._require("owner", body.get("supervisor_id"))
                 context = self._context(auth, body.get("supervisor_id"))
                 result, code = topify_supervisor.create_owner_form(
                     context.root, body["employee_id"], body.get("note", "")
                 )
-                self._respond(201 if code == 0 else 409, result)
+                self._respond(202 if code == 0 else 409, result)
                 return
             if parsed.path == "/api/owner-form-sync":
                 body = self._body()
@@ -654,6 +701,14 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 body = self._body()
                 auth = self._require(supervisor_id=body.get("supervisor_id"))
                 context = self._context(auth, body.get("supervisor_id"))
+                if body.get("target_type") == "supervisor":
+                    self._require("owner", body.get("supervisor_id"))
+                    manifest = common.load_json(context.root / "supervision/manifest.json")
+                    if body.get("target_id") not in {context.supervisor_id, manifest["supervisor_id"], "supervisor"}:
+                        raise common.PipelineError("消息上司目标与当前 campaign 不一致")
+                    result, code = topify_supervisor.send_supervisor_message(context.root, body["text"])
+                    self._respond(202 if code == 0 else 409, result)
+                    return
                 result, code = topify_supervisor.send_message(
                     context.root, body["target_type"], body["target_id"], body["text"],
                     sender_type=auth[0], sender_id=auth[1] or "owner",
@@ -674,20 +729,15 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 body = self._body()
                 auth = self._require("owner", body.get("supervisor_id"))
                 context = self._context(auth, body.get("supervisor_id"))
+                if body.get("intent") != "runtime":
+                    context.require_bound_session(body["session_id"])
                 result = topify_opencode.reply_form(
                     context.session_directory, body["session_id"],
                     body["form_id"], body["answer"],
                 )
-                # A native reply is only the interaction receipt. If this is
-                # an owner-decision form, immediately consume that receipt in
-                # the production ledger so the Workforce state cannot remain
-                # falsely pending after the owner has answered.
-                if topify_supervisor._owner_form_employee_id(context.root, body["form_id"]):
-                    synced, sync_code = topify_supervisor.sync_owner_form_by_form(
-                        context.root, body["form_id"]
-                    )
-                    result = {**result, "ledger_sync": synced, "ledger_sync_code": sync_code}
-                context.questions(force=True)
+                if body.get("intent") != "runtime":
+                    receipt = context.record_native_reply(result, body["answer"])
+                    result = {**result, "reply_receipt": receipt}
                 self._respond(200, result)
                 return
             if parsed.path == "/api/employee-session-message":
@@ -709,7 +759,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             return
         except topify_opencode.FormSettledError as exc:
             self._respond(409, {"error": str(exc)})
-        except (KeyError, common.PipelineError, OSError, ValueError, TypeError) as exc:
+        except (KeyError, common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
             self._respond(400, {"error": str(exc)})
 
     def _write_command(self, context: SupervisorContext, body: dict) -> dict:

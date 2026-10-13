@@ -54,10 +54,18 @@ employee table plus only actionable alerts. Use the OpenCode child-session
 result or Orca `worker-show`/`worker-read` only for the named employee; the
 supervisor should not flood the owner with every raw transcript.
 
-Owner decisions are native to the supervisor's bound OpenCode session: create a
-form with `owner-form-create`, let the owner choose its real fields/options,
-then sync it with `owner-form-sync`. Do not manufacture a form in the Web UI or
-send an approval choice as ordinary chat.
+Owner decisions must be asked with the supervisor's native `question` TOOL,
+which is actually awaiting the answer in the bound session. A shell/API-created
+Form is not equivalent: it has no waiting agent. After the tool returns the
+owner answer, the supervisor executes the scoped lawful next step and retains
+actual action/transport receipts; a state write is not execution. Acceptance
+notes are optional. Routine helper completions and QC-1 repair stay with the
+supervisor, not a blanket owner approval queue. Web messages now use the native
+prompt inbox and show real replies. The compatibility `owner-form-create`
+command requests a real supervisor review; it does not create forms.
+`owner-form-sync` refuses legacy detached forms. For a Web-interactive headless
+supervisor use native prompt admission, not non-interactive `opencode run`,
+which may automatically cancel questions.
 
 When several Benchmarks are active, use the supervisor registry and keep one
 campaign/evidence tree per supervisor. The shared dedup root is the only

@@ -1,5 +1,7 @@
 /* Native OpenCode form renderer. Selection never sends a chat prompt. */
 (() => {
+  let mountId = 0;
+  const containers = new WeakMap();
   const el = (tag, className, text) => {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -13,6 +15,7 @@
   };
 
   function mount(container, form, submit) {
+    const identity = ++mountId;
     const card = el('article', 'native-question');
     card.append(el('h3', '', form.title || '待回答问题'));
     card.append(el('p', 'question-source', `来自会话：${form.session_title} · ${form.session_id}`));
@@ -36,7 +39,9 @@
       const makeChoice = (value, label, description, type) => {
         const wrapper = el('label', 'question-choice');
         const input = el('input'); input.type = type;
-        input.name = `${form.form_id}:${field.key}`;
+        // The same native question can be visible on the board and inspector.
+        // Radio groups must belong to one rendered card, not the whole page.
+        input.name = `native-${identity}:${field.key}`;
         const body = el('span'); body.append(el('strong', '', label));
         if (description) body.append(el('small', '', description));
         input.addEventListener('change', updateVisibility);
@@ -157,20 +162,35 @@
       sending = true; confirm.disabled = true; edit.disabled = true;
       notice.textContent = '正在提交…';
       try {
-        await submit(form, answer);
-        review.replaceChildren(el('p', '', '回答已提交到 OpenCode。'));
-        notice.textContent = '原会话已收到结构化回答。';
+        const result = await submit(form, answer);
+        review.replaceChildren(el('p', '', '回答已交给 Agent 正在等待的 question 工具。'));
+        notice.textContent = result?.note || '同一会话将继续处理；后续操作是否完成请查看其回复与工具调用。';
       } catch (error) {
         notice.textContent = error.message;
         confirm.disabled = false; edit.disabled = false;
       } finally { sending = false; }
     });
     confirm.classList.add('primary');
-    choose.disabled = unsupported;
+    choose.disabled = unsupported || !form.can_reply;
     card.append(fieldsBody, review, notice, choose);
     container.append(card);
     updateVisibility();
     return card;
   }
-  window.OpenCodeDecisions = {mount};
+  function sync(container, forms, submit) {
+    let cards = containers.get(container);
+    if (!cards) { cards = new Map(); containers.set(container, cards); }
+    const keep = new Set(forms.map(f => f.form_id));
+    for (const [id, item] of cards) {
+      if (!keep.has(id)) {item.card.remove(); cards.delete(id);}
+    }
+    for (const form of forms) {
+      const contract = JSON.stringify([form.fields, form.can_reply]);
+      const existing = cards.get(form.form_id);
+      if (existing?.contract === contract) continue;
+      existing?.card.remove();
+      cards.set(form.form_id, {contract, card:mount(container, form, submit)});
+    }
+  }
+  window.OpenCodeDecisions = {mount, sync};
 })();

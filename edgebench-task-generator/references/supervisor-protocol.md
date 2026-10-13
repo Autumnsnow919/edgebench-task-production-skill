@@ -25,18 +25,24 @@ session can additionally inspect the selected native Task's result. In Orca,
 the supervisor maps the selected dispatch to `worker-show`/`worker-read` and
 waits on `orchestration check`; the owner does not need to open a terminal pane.
 
-The Web console also provides direct conversations. Owner messages are stored
-as immutable `message.json` receipts under the target supervisor/employee
-inbox. Supervisors, producers and QC workers must read their inbox at each
-heartbeat and reply in that same target conversation with `employee-message`
-(including `--reply-to`); a queued message is not answered until a reply
-receipt exists. A worker can send a separate supervisor-targeted message for
-escalation.
+Web owner input for the supervisor is stored as an immutable ledger receipt
+and submitted to the *bound actual session's* native prompt inbox with resume.
+The Web displays that session's real assistant replies and tools. Admission is
+not acknowledgment or execution. An interrupted supervisor stays visibly
+interrupted until an explicit owner message/review request resumes it. Reading
+the dashboard or creating a ledger object never wakes an agent. Employee
+ledger inboxes remain a separate durable channel; worker replies need receipts.
 
-For a production gate, the supervisor must bind its actual OpenCode session and
-create an owner form with `owner-form-create`; the Web merely mirrors that
-native form. `owner-form-sync` verifies the native answer and writes the ledger
-decision. A Web-only synthetic approval is not valid evidence.
+For a true owner gate, the supervisor calls the native `question` TOOL and
+waits. Web reply validates the form's tool message/ID and running tool state,
+then submits the answer to that tool. The same agent resumes, uses the answer
+for the scoped next action and records actual evidence. Web does not map a
+generic acceptance into rollout authorization. API-created detached forms
+and old `owner_form: pending` ledger records cannot authorize production.
+The `owner-form-create` compatibility command only sends a review request to
+the supervisor; `owner-form-sync` refuses detached legacy forms. Routine Seed,
+helper and QC-1 handling is the supervisor's responsibility. No automatic
+decision, waiver or rollout is inferred from a review request.
 
 ## Authority model
 

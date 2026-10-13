@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>EdgeBench · 智能体生产台</title>
-  <link rel="stylesheet" href="/style.css?v=zh-native-questions-20261012">
+  <link rel="stylesheet" href="/style.css?v=real-supervisor-20261013">
 </head>
 <body>
   <div class="app-shell">
@@ -43,9 +43,16 @@
           <div class="metric accent-metric"><span>运行状态</span><strong id="health">检测中</strong><small>核对台账与实时连接</small></div>
         </section>
 
+        <section class="panel-surface supervisor-panel">
+          <div class="panel-title"><div><p class="overline">本批次实际控制者</p><h2>上司会话</h2></div><span id="supervisor-status" class="status-chip">检测中…</span></div>
+          <p id="supervisor-identity" class="scope-note">正在核验实际绑定…</p>
+          <p id="supervisor-note" class="form-hint"></p>
+          <button id="supervisor-inspect" type="button" class="action-button" disabled>查看上司回复与工具调用</button>
+        </section>
         <section id="native-questions" class="panel-surface native-questions-panel">
-          <div class="panel-title"><div><p class="overline">OpenCode 原生交互</p><h2>需要你回答的问题</h2></div><span id="native-question-count" class="form-hint">检测中…</span></div>
-          <p id="native-question-note" class="form-hint">选项来自 OpenCode 会话本身。选择或自填后，核对并确认提交；不会把回答作为普通聊天消息发送。</p>
+          <div class="panel-title"><div><p class="overline">Agent 正在等待的原生 question</p><h2>需要你回答的问题</h2></div><span id="native-question-count" class="form-hint">检测中…</span></div>
+          <p id="native-question-note" class="form-hint">回答交给正在等待的 question 工具；是否已执行，以同一会话的工具调用和阶段回执为准。</p>
+          <p id="native-answer-result" class="form-hint" role="status"></p>
           <div id="native-question-list"></div>
         </section>
 
@@ -59,7 +66,7 @@
         <section id="agent-grid" class="agent-grid"></section>
         <section class="lower-grid">
           <div class="activity-panel panel-surface"><div class="panel-title"><div><p class="overline">活动</p><h2>实时活动</h2></div><button id="activity-all" class="text-button">查看全部</button></div><div id="activity" class="activity-list"></div></div>
-          <div class="attention-panel panel-surface"><div class="panel-title"><div><p class="overline">生产队伍事项 · 本批次</p><h2>等待负责人处理</h2></div></div><p class="form-hint">员工台账告警与上方 OpenCode 原生提问不同；需要的回答以原提问为准。</p><div id="alerts" class="attention-list"></div></div>
+          <div class="attention-panel panel-surface"><div class="panel-title"><div><p class="overline">生产队伍事项 · 本批次</p><h2>等待上司处理</h2></div></div><p class="form-hint">阶段报告不是负责人审批。需要你的决定时，上司必须提出具体的原生 question。</p><div id="alerts" class="attention-list"></div></div>
         </section>
       </div>
     </main>
@@ -75,11 +82,11 @@
       <div id="detail-questions" class="inspector-body hidden"><p id="detail-question-status" class="form-hint"></p><div id="detail-question-list"></div></div>
       <div id="detail-activity" class="inspector-body hidden"><pre id="detail-log" class="log-view"></pre></div>
       <div id="detail-evidence-tab" class="inspector-body hidden"><pre id="detail-json" class="json-view"></pre></div>
-      <div class="inspector-actions"><button id="dispatch-worker" class="action-button primary">准备派发</button><button id="fire-worker" class="action-button danger">封存员工子树</button></div>
+      <div class="inspector-actions"><button id="dispatch-worker" class="action-button primary">请上司审查此员工</button><button id="fire-worker" class="action-button">联系上司</button></div>
     </aside>
   </div>
-  <div id="command-modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><div><p class="overline">上司消息</p><h2>联系本工作空间的上司</h2></div><button id="command-close" class="close-button" aria-label="关闭对话">×</button></div><p class="modal-copy">此处是持久化消息队列。原生问题请在“需要你回答的问题”中选择回答，不要用聊天消息替代。</p><div id="supervisor-messages" class="message-list modal-messages"></div><form id="command-form"><textarea id="command-input" placeholder="例如：汇报当前出题进度，不要启动模型试跑。"></textarea><div class="modal-actions"><span id="command-result" class="form-hint">消息将排队等待上司读取，不代表已经执行。</span><button class="action-button primary" type="submit">加入消息队列</button></div></form></div></div>
-  <script src="/decisions.js?v=zh-native-questions-20261012"></script>
-  <script src="/app.js?v=zh-native-questions-20261012"></script>
+  <div id="command-modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><div><p class="overline">真实 OpenCode 会话</p><h2>联系本工作空间的上司</h2></div><button id="command-close" class="close-button" aria-label="关闭对话">×</button></div><p id="command-binding" class="modal-copy">消息会提交给已核验绑定的实际上司；发送会唤醒该会话。接收不等于执行，以下显示真实回复与工具调用。</p><div id="supervisor-messages" class="message-list modal-messages"></div><form id="command-form"><textarea id="command-input" placeholder="例如：汇报当前 QC 修复方案，不要启动模型试跑。"></textarea><div class="modal-actions"><span id="command-result" class="form-hint">发送后查看真实上司回复；不会偷偷替你回答原生问题。</span><button id="command-send" class="action-button primary" type="submit">发送给实际上司</button></div></form></div></div>
+  <script src="/decisions.js?v=real-supervisor-20261013"></script>
+  <script src="/app.js?v=real-supervisor-20261013"></script>
 </body>
 </html>

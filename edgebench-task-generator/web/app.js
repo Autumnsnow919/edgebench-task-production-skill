@@ -42,6 +42,8 @@
     rollout_gate_recorded:'试跑检查已记录', replacement_order_created:'补员工作单已生成',
     message_queued:'消息已入队', owner_command_queued:'负责人指令已入队',
     employee_session_message_sent:'消息已提交员工会话', opencode_form_answered:'已回答 OpenCode 原生问题',
+    supervisor_session_message_sent:'消息已提交真实上司', native_question_answered:'回答已交给等待中的工具',
+    supervisor_message_delivery_failed:'上司接收未确认',
   };
   const label = value => LABELS[value] || value || '未报告';
   const ago = value => {
@@ -74,10 +76,12 @@
   let selectionEpoch = 0;
   let stream = null;
   let updating = false;
-  let formsRefreshing = false;
-  let formsFingerprint = '';
+  const questionRequests = new Map();
+  let globalForms = [];
+  let detailForms = [];
   let nativeForms = [];
   let chatSending = false;
+  let supervisorChatLoading = false;
 
   const query = fields => new URLSearchParams({supervisor_id:scope, ...fields});
   function setConnection(text, bad = false) {
@@ -107,8 +111,18 @@
     $('active-note').textContent = `登记 ${employees.length} 人 · 未绑定 ${w.unbound ?? '—'} 人`;
     $('capacity').textContent = `${value.capacity?.available ?? '—'} / ${value.capacity?.max_concurrent ?? '—'}`;
     $('alert-count').textContent = value.alerts?.length ?? 0;
-    $('alert-note').textContent = value.alerts?.length ? '需要负责人处理' : '暂无告警';
-    $('health').textContent = value.opencode_sessions?.status === 'unavailable' ? '运行时不可用' : '已连接';
+    $('alert-note').textContent = value.alerts?.length ? '等待上司审查，不等于负责人审批' : '暂无告警';
+    const supervisor = value.supervisor_runtime || {status:'unbound'};
+    $('health').textContent = supervisor.status === 'running' ? '上司运行中' : `上司${label(supervisor.status)}`;
+    $('supervisor-status').textContent = label(supervisor.status);
+    $('supervisor-identity').textContent = supervisor.session_id
+      ? `${supervisor.title || '已绑定上司'} · ${supervisor.session_id} · 实际 Agent：${label(supervisor.agent)}`
+      : '本批次没有绑定真实上司会话。';
+    $('supervisor-note').textContent = `${supervisor.reason || ''} 最近实际活动：${ago(supervisor.updated_at)}。查看不会唤醒；发送消息才会恢复该会话。`;
+    $('supervisor-inspect').disabled = !supervisor.can_chat;
+    document.querySelector('.supervisor-panel').classList.toggle('warning', supervisor.status !== 'running');
+    $('command-input').disabled = !supervisor.can_chat;
+    $('command-send').disabled = !supervisor.can_chat;
     $('updated').textContent = new Date().toLocaleTimeString('zh-CN');
     $('workspace-title').textContent = info.campaign_id || scope;
     $('workspace-heading').textContent = `${value.benchmark || '本工作空间'}生产现场`;
@@ -138,8 +152,9 @@
   function renderAlerts() {
     const alerts = data?.alerts || [];
     const seen = new Set();
-    $('alerts').innerHTML = alerts.filter(a => {const key=`${a.employee_id}:${a.status}`; if(seen.has(key)) return false; seen.add(key); return true;}).map(a => `<div class="attention-item"><strong>${esc(a.employee_id)} · ${esc(label(a.status))}</strong><small>${esc(data.employees?.find(e => e.employee_id === a.employee_id)?.report?.summary || '请核对原始提问和证据。')}</small><div class="alert-actions"><button type="button" class="alert-action" data-review="${esc(a.employee_id)}">查看并决定</button></div></div>`).join('') || '<div class="empty">当前没有台账待处理事项。原生提问请查看上方模块。</div>';
-    $('alerts').querySelectorAll('[data-review]').forEach(b => b.addEventListener('click', () => showEmployee(b.dataset.review, 'questions')));
+    $('alerts').innerHTML = alerts.filter(a => {const key=`${a.employee_id}:${a.status}`; if(seen.has(key)) return false; seen.add(key); return true;}).map(a => `<div class="attention-item"><strong>${esc(a.employee_id)} · ${esc(label(a.status))}</strong><small>${esc(a.report?.summary || data.employees?.find(e => e.employee_id === a.employee_id)?.report?.summary || '阶段报告待上司处理；没有实际提问时不需要你填写审批。')}</small><div class="alert-actions"><button type="button" class="alert-action" data-review="${esc(a.employee_id)}">查看报告</button><button type="button" class="alert-action" data-supervisor-review="${esc(a.employee_id)}" ${data.supervisor_runtime?.can_chat ? '' : 'disabled'}>请上司处理</button></div></div>`).join('') || '<div class="empty">当前没有台账待处理事项。</div>';
+    $('alerts').querySelectorAll('[data-review]').forEach(b => b.addEventListener('click', () => showEmployee(b.dataset.review)));
+    $('alerts').querySelectorAll('[data-supervisor-review]').forEach(b => b.addEventListener('click', () => requestSupervisorReview(b.dataset.supervisorReview, b)));
   }
   function renderActivity(rows) {
     events = rows;
@@ -156,8 +171,9 @@
     document.querySelectorAll('.inspector-body').forEach(body => body.classList.toggle('hidden', body.id !== (tab === 'evidence' ? 'detail-evidence-tab' : `detail-${tab}`)));
     if (tab === 'questions') renderDetailQuestions();
   }
-  function closeInspector() {selection = null; selectionEpoch++; $('inspector').classList.add('hidden'); $('inspector').setAttribute('aria-hidden','true');}
+  function closeInspector() {selection = null; detailForms=[]; selectionEpoch++; $('inspector').classList.add('hidden'); $('inspector').setAttribute('aria-hidden','true');}
   function prepareEmployeeInspector(id, tab) {
+    detailForms=[]; nativeForms=globalForms;
     const known = data?.employees?.find(e => e.employee_id === id) || null;
     selection = {kind:'employee', id, employee:known || {employee_id:id, status:'loading'}, sessionId:known?.session_id};
     $('inspector').classList.remove('hidden'); $('inspector').setAttribute('aria-hidden','false');
@@ -193,14 +209,14 @@
       $('detail-evidence').innerHTML = `<h3>当前证据</h3><p>质检：${esc(label(employee.qc?.decision))}<br>模型试跑：${esc(label(employee.rollout_gate?.status))}<br>最近报告：${esc(label(employee.report?.status))}</p>`;
       $('detail-json').textContent = JSON.stringify(employee,null,2); $('detail-log').textContent = employee.report?.summary || '暂无员工报告。';
       $('dispatch-worker').hidden = false; $('fire-worker').hidden = false;
-      $('dispatch-worker').disabled = !['active','queued','repair-required'].includes(employee.status);
-      $('fire-worker').disabled = employee.status === 'fired';
+      $('dispatch-worker').disabled = !data?.supervisor_runtime?.can_chat || ['fired','complete'].includes(employee.status);
+      $('fire-worker').disabled = !data?.supervisor_runtime?.can_chat;
       $('employee-chat-input').disabled = !employee.runtime?.can_chat; $('employee-chat-send').disabled = !employee.runtime?.can_chat;
       $('employee-chat-input').value = ''; $('detail-messages').textContent = '';
       $('employee-chat-status').textContent = employee.runtime?.can_chat ? '消息提交到此员工的实际会话；原生问题请在“待回答”中选择。' : '未核验可操纵会话，不能直接发送。';
       openTab(tab);
       await Promise.all([
-        employee.runtime?.can_chat ? refreshChat() : Promise.resolve(),
+        tab === 'chat' ? refreshChat() : Promise.resolve(),
         refreshQuestions(true),
       ]);
     } catch (error) {
@@ -213,10 +229,12 @@
     }
   }
   async function showSession(id) {
-    const session = data?.opencode_sessions?.sessions?.find(s => s.session_id === id);
+    const isSupervisor = data?.supervisor_runtime?.session_id === id;
+    const session = isSupervisor ? data.supervisor_runtime : data?.opencode_sessions?.sessions?.find(s => s.session_id === id);
     if (!session) return;
     selectionEpoch++;
-    selection = {kind:'session', id, sessionId:id};
+    detailForms = [];
+    selection = {kind:isSupervisor ? 'supervisor' : 'session', id, sessionId:id};
     $('inspector').classList.remove('hidden'); $('inspector').setAttribute('aria-hidden','false');
     $('detail-title').textContent = session.title; $('detail-role').textContent = `${label(session.agent)} · ${id}`;
     $('detail-avatar').textContent = '会'; $('detail-status').textContent = label(session.status);
@@ -226,12 +244,12 @@
     $('dispatch-worker').hidden = true; $('fire-worker').hidden = true;
     $('employee-chat-input').disabled = false; $('employee-chat-send').disabled = false; $('employee-chat-input').value = '';
     $('detail-messages').textContent = ''; $('employee-chat-status').textContent = '已选中此会话。查看不会发消息；发送消息和回答原生问题是两种不同操作。';
-    openTab('chat'); await refreshChat(); await refreshQuestions();
+    openTab('chat'); await Promise.all([refreshChat(), refreshQuestions(true)]);
   }
   async function refreshChat() {
     if (!selection?.sessionId || $('inspector').classList.contains('hidden')) return;
     const current = selection, epoch = selectionEpoch, currentScope = scope;
-    const path = current.kind === 'employee' ? `/api/employee-session?${query({employee_id:current.id})}` : `/api/opencode-session?${query({session_id:current.id})}`;
+    const path = current.kind === 'supervisor' ? `/api/supervisor-session?${query({})}` : current.kind === 'employee' ? `/api/employee-session?${query({employee_id:current.id})}` : `/api/opencode-session?${query({session_id:current.id})}`;
     try {
       const value = await api(path);
       if (epoch !== selectionEpoch || currentScope !== scope) return;
@@ -244,61 +262,60 @@
     const capturedScope = scope;
     const value = await api('/api/opencode-form-reply', {method:'POST', body:JSON.stringify({
       supervisor_id:capturedScope, session_id:form.session_id, form_id:form.form_id, answer,
+      intent:selection?.kind === 'session' ? 'runtime' : 'production',
     })});
-    nativeForms = nativeForms.filter(f => f.form_id !== form.form_id);
-    formsFingerprint = ''; setConnection('原生回答已提交');
-    await Promise.all([refreshQuestions(selection?.kind === 'employee'), refresh()]);
+    globalForms = globalForms.filter(f => f.form_id !== form.form_id);
+    detailForms = detailForms.filter(f => f.form_id !== form.form_id);
+    $('native-answer-result').textContent = value.note || '回答已交给正在等待的 Agent；尚不代表后续工作完成。请查看上司回复与工具调用。';
+    setConnection('回答已交给真实等待工具，执行结果待上司反馈');
+    await Promise.all([refreshQuestions(true), refresh(), supervisorMessages()]);
     return value;
   }
   function renderDetailQuestions() {
-    const box=$('detail-question-list'); box.replaceChildren();
+    const box=$('detail-question-list');
     const questions = nativeForms.filter(f => {
       if (!selection) return false;
       if (selection.kind === 'employee') {
         const employeeId = f.metadata?.edgebench?.employee_id;
-        return employeeId === selection.id || Boolean(selection.sessionId && f.session_id === selection.sessionId);
+        return employeeId === selection.id || f.session_id === data?.supervisor_runtime?.session_id || Boolean(selection.sessionId && f.session_id === selection.sessionId);
       }
       return f.session_id === selection.sessionId;
     });
-    $('detail-question-status').textContent = questions.length ? `${questions.length} 个原生问题待回答` : '此会话暂无原生待回答问题；不会从员工状态伪造审批选项。';
-    for (const f of questions) window.OpenCodeDecisions.mount(box,f,submitNative);
+    const live = questions.filter(f => f.can_reply);
+    $('detail-question-status').textContent = live.length ? `${live.length} 个 Agent 问题；上司问题以其原文对象为准` : '没有 Agent 正在等待你的回答；阶段告警不等于负责人审批。';
+    window.OpenCodeDecisions.sync(box, live, submitNative);
+    box.querySelector('.ledger-question-note')?.remove();
     if (selection?.kind === 'employee') {
       const note = document.createElement('div');
       note.className = 'ledger-question-note';
       const waiting = ['needs-owner-decision','replacement-required','repair-required','rollout-pending','awaiting-approval'].includes(selection.employee.status);
-      note.textContent = questions.length
-        ? `员工台账状态：${label(selection.employee.status)}。上方问题来自绑定的 OpenCode 会话；审批选项没有由 Web 伪造。`
+      note.textContent = live.length
+        ? `台账：${label(selection.employee.status)}。回答后同一 Agent 继续；查看其实际回复和工具调用，不把“已提交”当成“已执行”。`
         : waiting
-          ? `员工台账状态：${label(selection.employee.status)}，但当前上司会话没有可回答的原生问题。Web 不会伪造审批；请让上司会话重新创建并刷新。`
+          ? `台账：${label(selection.employee.status)}。先由上司审查阶段报告。旧 Form 收据不能放行生产，可点击下方“请上司审查此员工”。`
           : `员工台账状态：${label(selection.employee.status)}。这里只显示 OpenCode 原生问题。`;
       box.append(note);
     }
   }
   async function refreshQuestions(selectionOnly = false) {
-    if (!scope || formsRefreshing) return;
-    formsRefreshing=true; const currentScope=scope;
+    if (!scope || (selectionOnly && !selection)) return;
+    const currentScope=scope, currentSelection=selection, epoch=selectionEpoch;
+    const fields = selectionOnly ? currentSelection.kind === 'employee' ? {employee_id:currentSelection.id} : {session_id:currentSelection.sessionId} : {};
+    const path = `/api/opencode-forms?${query(fields)}`;
     try {
-      const fields = selectionOnly && selection?.kind === 'employee' ? {employee_id:selection.id} : {};
-      const value=await api(`/api/opencode-forms?${query(fields)}`);
-      if (scope !== currentScope) return;
-      $('native-question-count').textContent=value.status==='ok' ? `${value.forms?.length || 0} 个待回答` : '暂不可用';
-       if(value.status!=='ok') {
-         $('native-question-note').textContent=value.reason || '原生问题查询失败。';
-         if(selection) renderDetailQuestions();
-         return;
-       }
-       $('native-question-note').textContent='选项来自 OpenCode 原生提问。选择或自填后核对、确认提交，不发送普通聊天消息。';
-       const fingerprint=JSON.stringify(value.forms || []);
-       const changed = fingerprint !== formsFingerprint;
-       nativeForms=value.forms || []; formsFingerprint=fingerprint;
-       if(changed) {
-         $('native-question-list').replaceChildren();
-         for(const f of nativeForms) window.OpenCodeDecisions.mount($('native-question-list'),f,submitNative);
-         if(!nativeForms.length) $('native-question-list').textContent='当前没有原生问题。新问题出现后会自动显示；也可点开会话进入“待回答”。';
-       }
-       if(selection) renderDetailQuestions();
+      if (!questionRequests.has(path)) questionRequests.set(path, api(path).finally(() => questionRequests.delete(path)));
+      const value=await questionRequests.get(path);
+      if (scope !== currentScope || (selectionOnly && epoch !== selectionEpoch)) return;
+      if(value.status!=='ok') throw new Error(value.reason || '原生问题查询失败。');
+      if(selectionOnly) detailForms=value.forms || []; else globalForms=value.forms || [];
+      nativeForms=[...new Map([...globalForms, ...detailForms].map(f => [f.form_id,f])).values()];
+      const live = globalForms.filter(f => f.can_reply);
+      const detached = globalForms.length - live.length;
+      $('native-question-count').textContent=`${live.length} 个实际问题`;
+      $('native-question-note').textContent=detached ? `${detached} 个表单未核验到等待中的 Agent，不能用于批准生产。` : live.length ? '回答会恢复正在等待的 question 工具；执行结果查看同一上司会话。' : '当前没有 Agent 在等你的回答。下方阶段报告先由上司处理，不需要填写通用接受/淘汰表单。';
+      window.OpenCodeDecisions.sync($('native-question-list'),live,submitNative);
+      if(selection) renderDetailQuestions();
     } catch(error) {if(scope===currentScope){$('native-question-count').textContent='查询失败'; $('native-question-note').textContent=error.message;}}
-    finally {formsRefreshing=false;}
   }
 
   async function refresh() {
@@ -325,52 +342,75 @@
   }
   async function switchWorkspace(id) {
     if(!id || scope===id) return;
-    scope=id; data=null; formsFingerprint=''; nativeForms=[];
+    scope=id; data=null; globalForms=[]; detailForms=[]; nativeForms=[];
+    window.OpenCodeDecisions.sync($('native-question-list'), [], submitNative);
+    $('native-answer-result').textContent='';
     closeInspector(); $('command-modal').classList.add('hidden');
     history.replaceState(null,'',`?supervisor_id=${encodeURIComponent(id)}`);
     renderWorkspaces(); connect(); await refresh(); await refreshQuestions();
   }
   async function supervisorMessages() {
-    if(!scope) return;
+    if(!scope || supervisorChatLoading) return;
+    supervisorChatLoading=true;
     const captured=scope;
-    try {const value=await api(`/api/messages?${query({target_type:'supervisor',target_id:scope})}`);
-      if(captured===scope) renderMessages(value.messages || [],'supervisor-messages','暂无上司消息。');
+    try {const value=await api(`/api/supervisor-session?${query({})}`);
+      if(captured===scope) {
+        renderMessages(value.messages || [],'supervisor-messages','暂无真实上司回复。');
+        $('command-binding').textContent=`实际上司：${value.session_id} · ${label(value.runtime?.status)}。发送会唤醒此会话；原生问题请单独回答，接收不代表执行。`;
+      }
     } catch(error) {$('command-result').textContent=error.message;}
+    finally {supervisorChatLoading=false;}
+  }
+  function openSupervisorChat() { $('command-modal').classList.remove('hidden'); supervisorMessages(); }
+  async function requestSupervisorReview(id, button) {
+    if(!data?.supervisor_runtime?.can_chat) return;
+    if(!window.confirm(`将 ${id} 的报告交给真实上司审查？这会唤醒其会话，但不批准试跑、QC 例外或淘汰。`)) return;
+    const captured=scope;
+    if(button) button.disabled=true;
+    try {
+      const result=await api('/api/supervisor-review',{method:'POST',body:JSON.stringify({supervisor_id:captured,employee_id:id})});
+      if(captured!==scope) return;
+      $('command-result').textContent=`已接收 ${result.inbox_id || result.message_id}；等待真实回复与操作回执。`;
+      openSupervisorChat();
+    } catch(error) {$('connection').textContent=error.message;}
+    finally {if(button) button.disabled=false;}
   }
 
   $('refresh').addEventListener('click',()=>{refresh();refreshQuestions();});
   $('close-detail').addEventListener('click',closeInspector);
   document.querySelector('.inspector-backdrop').addEventListener('click',closeInspector);
   document.querySelectorAll('.inspector-tab').forEach(b=>b.addEventListener('click',()=>openTab(b.dataset.tab)));
-  $('command-open').addEventListener('click',()=>{$('command-modal').classList.remove('hidden');supervisorMessages();});
+  $('supervisor-inspect').addEventListener('click',()=>showSession(data?.supervisor_runtime?.session_id));
+  $('command-open').addEventListener('click',openSupervisorChat);
   $('command-close').addEventListener('click',()=>$('command-modal').classList.add('hidden'));
   $('command-form').addEventListener('submit',async event=>{
     event.preventDefault(); const input=$('command-input'); if(!input.value.trim() || !scope) return;
-    try {await api('/api/message',{method:'POST',body:JSON.stringify({supervisor_id:scope,target_type:'supervisor',target_id:scope,text:input.value.trim()})}); input.value='';$('command-result').textContent='消息已入队，等待上司实际读取。';await supervisorMessages();}
+    $('command-send').disabled=true;
+    try {const value=await api('/api/message',{method:'POST',body:JSON.stringify({supervisor_id:scope,target_type:'supervisor',target_id:scope,text:input.value.trim()})}); input.value='';$('command-result').textContent=`真实会话已接收 ${value.inbox_id || value.message_id}；请等上司回复，尚无执行完成证据。`;await supervisorMessages();}
     catch(error){$('command-result').textContent=error.message;}
+    finally {$('command-send').disabled=!data?.supervisor_runtime?.can_chat;}
   });
   $('employee-chat-form').addEventListener('submit',async event=>{
     event.preventDefault(); const input=$('employee-chat-input'); if(!selection || !input.value.trim() || chatSending) return;
     const current=selection, captured=scope, epoch=selectionEpoch;
     if(!window.confirm(`将普通消息发送给 ${current.id}？原生问题请改用“待回答”。`)) return;
     chatSending=true; $('employee-chat-send').disabled=true;
-    try {await api(current.kind==='employee'?'/api/employee-session-message':'/api/opencode-message',{method:'POST',body:JSON.stringify({supervisor_id:captured,employee_id:current.kind==='employee'?current.id:undefined,session_id:current.sessionId,text:input.value.trim()})});
+    try {await api(current.kind==='supervisor'?'/api/message':current.kind==='employee'?'/api/employee-session-message':'/api/opencode-message',{method:'POST',body:JSON.stringify({supervisor_id:captured,employee_id:current.kind==='employee'?current.id:undefined,session_id:current.sessionId,text:input.value.trim(),target_type:current.kind==='supervisor'?'supervisor':undefined,target_id:current.kind==='supervisor'?captured:undefined})});
       if(epoch===selectionEpoch){input.value='';$('employee-chat-status').textContent='普通消息已提交真实会话，等待回复。';await refreshChat();}}
     catch(error){if(epoch===selectionEpoch) $('employee-chat-status').textContent=error.message;}
     finally {chatSending=false;if(epoch===selectionEpoch)$('employee-chat-send').disabled=false;}
   });
   $('dispatch-worker').addEventListener('click',async()=>{
     if(selection?.kind!=='employee') return;
-    try{await api('/api/dispatch',{method:'POST',body:JSON.stringify({supervisor_id:scope,employee_id:selection.id})});await refresh();await showEmployee(selection.id);}
-    catch(error){$('employee-chat-status').textContent=error.message;}
+    await requestSupervisorReview(selection.id, $('dispatch-worker'));
   });
-  $('fire-worker').addEventListener('click',()=>{if(selection?.kind==='employee')openTab('questions');});
+  $('fire-worker').addEventListener('click',openSupervisorChat);
   document.querySelectorAll('.view-switch').forEach(b=>b.addEventListener('click',()=>{view=b.dataset.view;document.querySelectorAll('.view-switch').forEach(x=>x.classList.toggle('active',x===b));renderEmployees();}));
   $('filter-button').addEventListener('click',()=>{filter=filter==='all'?'attention':filter==='attention'?'active':'all';$('filter-button').textContent=`筛选：${{all:'全部',attention:'待处理',active:'未封存'}[filter]}`;renderEmployees();});
   $('activity-all').addEventListener('click',()=>{expanded=!expanded;renderActivity(events);});
   $('theme-toggle').addEventListener('click',()=>document.body.classList.toggle('dark-mode'));
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeInspector();$('command-modal').classList.add('hidden');}});
-  window.setInterval(()=>{if(document.hidden)return;refreshQuestions();refreshChat();if(!$('command-modal').classList.contains('hidden'))supervisorMessages();},5000);
+  window.setInterval(()=>{if(document.hidden)return;refreshQuestions();if(selection)refreshQuestions(true);if(document.querySelector('.inspector-tab.active')?.dataset.tab==='chat')refreshChat();if(!$('command-modal').classList.contains('hidden'))supervisorMessages();},5000);
   (async()=>{
     try {const value=await api('/api/supervisors');supervisors=value.supervisors || [];
       if(!supervisors.some(s=>s.supervisor_id===scope))scope=(supervisors.find(s=>s.workspace?.lock_state==='REQUIREMENTS_LOCKED') || supervisors[0])?.supervisor_id;

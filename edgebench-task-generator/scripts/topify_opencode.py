@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only OpenCode session adapter for the supervisor Web console."""
+"""OpenCode runtime adapter; native questions remain owned by their agent tools."""
 
 from __future__ import annotations
 
@@ -188,8 +188,33 @@ def employee_runtime(employee: dict, active: dict | None = None) -> dict:
                 "source": "opencode-api"}
     except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired):
         return {"status": "unavailable", "session_id": session_id,
-                "reason": "The bound session could not be verified; no runtime activity is assumed.",
-                "can_chat": False}
+                 "reason": "The bound session could not be verified; no runtime activity is assumed.",
+                 "can_chat": False}
+
+
+def supervisor_runtime(directory: str | Path, campaign: str | Path, manifest: dict,
+                       active: dict | None = None) -> dict:
+    session_id = manifest.get("supervisor_session_id")
+    if not session_id:
+        return {"status": "unbound", "session_id": None, "can_chat": False,
+                "reason": "未绑定真实上司会话；登记台账不代表上司正在运行。"}
+    try:
+        info = _visible_session(directory, session_id)
+        actual = Path(info["directory"]).resolve()
+        recorded = manifest.get("supervisor_session_directory")
+        if not recorded or actual != Path(recorded).resolve() or not Path(campaign).resolve().is_relative_to(actual):
+            return {"status": "binding-mismatch", "session_id": session_id, "can_chat": False,
+                    "reason": "上司会话目录与 campaign 的绑定不一致。"}
+        if active is None:
+            active = _get("/api/session/active").get("data", {})
+        status = "running" if session_id in active else (
+            info.get("outcome") if info.get("outcome") in {"interrupted", "failed"} else "idle"
+        )
+        return {**info, "status": status, "can_chat": True, "source": "opencode-api",
+                "reason": "消息将提交给此会话；接收消息与执行完成是两件事。"}
+    except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+        return {"status": "unavailable", "session_id": session_id, "can_chat": False,
+                "reason": "无法核验上司会话；不会推断其正在消费审批。"}
 
 
 def messages(directory: str | Path, session_id: str, limit: int = 100) -> dict:
@@ -256,12 +281,15 @@ def send_message(directory: str | Path, session_id: str, text: str) -> dict:
     if not isinstance(text, str) or not text.strip() or len(text) > 20_000:
         raise common.PipelineError("OpenCode session message must be nonempty and at most 20000 characters")
     result = _post(f"/api/session/{session_id}/prompt", {"text": text.strip(), "resume": True})
+    if not isinstance(result.get("data"), dict) or not result["data"].get("id"):
+        raise common.PipelineError("OpenCode 未返回原生消息接收凭证；不能声称上司/员工已收到。")
     return {"status": "sent", "session_id": session_id, "response": result}
 
 
 def _forms_from_responses(root: Path, responses: list[dict]) -> dict:
     forms = []
     seen = set()
+    session_info = {}
     for response in responses:
         if response.get("_tag"):
             raise common.PipelineError("无法读取 OpenCode 待回答问题。")
@@ -270,14 +298,31 @@ def _forms_from_responses(root: Path, responses: list[dict]) -> dict:
                 continue
             if not isinstance(form.get("id"), str) or FORM_ID.fullmatch(form["id"]) is None:
                 raise common.PipelineError("OpenCode 返回了无效的问题编号。")
-            info = _visible_session(root, form.get("sessionID"))
+            session_id = form.get("sessionID")
+            if session_id not in session_info:
+                session_info[session_id] = _visible_session(root, session_id)
+            info = session_info[session_id]
             fields = form.get("fields")
             if not isinstance(fields, list):
                 raise common.PipelineError("OpenCode 返回了无效的问题字段。")
             # Only expose the form contract, not arbitrary metadata/tool reasoning.
+            metadata = form.get("metadata") or {}
+            if not isinstance(metadata, dict):
+                raise common.PipelineError("OpenCode 返回了无效的问题来源。")
+            tool = metadata.get("tool") or {}
+            agent_question = metadata.get("kind") == "question" and isinstance(tool, dict) and bool(tool.get("messageID") and tool.get("id"))
+            consumer = None
+            if agent_question:
+                try:
+                    consumer = question_consumer(session_id, form)
+                except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+                    pass
             forms.append({"form_id": form["id"], "session_id": info["session_id"],
                           "session_title": info["title"], "title": form.get("title", "待回答问题"),
-                          "fields": fields, "metadata": form.get("metadata", {}),
+                          "fields": fields, "metadata": metadata,
+                          "interaction": "agent-question" if agent_question else "detached-form",
+                          "can_reply": consumer is not None,
+                          "consumer": consumer,
                           "status": "pending", "source": "opencode-form"})
             seen.add(form["id"])
     return {"status": "ok", "forms": forms}
@@ -365,15 +410,36 @@ def validate_form_answer(fields, answer):
     common.canonical_sha256(answer)
 
 
+def question_consumer(session_id: str, form: dict) -> dict:
+    """Verify the tool actually waiting for this answer, not merely a Form ID."""
+    metadata = form.get("metadata") or {}
+    tool = metadata.get("tool", {}) if isinstance(metadata, dict) else {}
+    if not isinstance(metadata, dict) or metadata.get("kind") != "question" or not isinstance(tool, dict) or not tool.get("messageID") or not tool.get("id"):
+        raise common.PipelineError("此表单没有正在等待回答的 Agent question 工具，不能用它放行生产。请联系上司重新审查。")
+    message_id = tool["messageID"]
+    if not isinstance(message_id, str) or not re.fullmatch(r"msg_[a-zA-Z0-9]+", message_id):
+        raise common.PipelineError("原生提问的工具来源无效。")
+    message = _get(f"/api/session/{session_id}/message/{message_id}").get("data", {})
+    for part in message.get("content", []):
+        if (part.get("type") == "tool" and part.get("id") == tool["id"]
+                and part.get("name") == "question" and part.get("state", {}).get("status") == "running"):
+            return {"message_id": message_id, "tool_id": tool["id"], "status": "waiting",
+                    "agent": message.get("agent")}
+    raise FormSettledError("上司已不在该 question 工具中等待；请刷新，不能把旧表单当作有效批准。")
+
+
 def reply_form(directory, session_id, form_id, answer):
     _visible_session(directory, session_id)
-    if not isinstance(form_id, str) or not (FORM_ID.fullmatch(form_id) or form_id.startswith("ledger-")):
+    if not isinstance(form_id, str) or not FORM_ID.fullmatch(form_id):
         raise common.PipelineError("无效的 OpenCode 问题编号。")
     form = _get(f"/api/session/{session_id}/form/{form_id}").get("data", {})
     if form.get("id") != form_id or form.get("sessionID") != session_id:
         raise common.PipelineError("问题不属于选中的会话。")
     if form.get("state", {}).get("status") != "pending":
         raise FormSettledError("问题已在其他界面处理，请刷新后查看。")
+    consumer = question_consumer(session_id, form)
     validate_form_answer(form.get("fields", []), answer)
     _post(f"/api/session/{session_id}/form/{form_id}/reply", {"answer": answer})
-    return {"status": "answered", "form_id": form_id, "session_id": session_id}
+    return {"status": "answered", "form_id": form_id, "session_id": session_id,
+            "consumer": consumer, "execution_status": "awaiting-agent-action",
+            "note": "已交给真实 question 工具继续执行；后续动作以会话工具调用和生产回执为准。"}

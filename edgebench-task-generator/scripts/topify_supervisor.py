@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """Supervisor protocol for hierarchical benchmark task production.
 
-This module deliberately does not start an agent, call Orca, or kill a process.
-It records the authority boundary around those actions so either the OpenCode
-main session or a headless Orca CLI coordinator can execute the same signed
-work orders and consume the same receipts.
+Dispatches and state changes are receipts, not worker execution. Explicit owner
+Web messages can resume a verified, already-bound supervisor through the native
+OpenCode prompt API. Merely reading this ledger never starts or stops an agent.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import re
+import subprocess
 
 import topify_common as common
 from topify_ledger_lock import mutation
@@ -347,11 +348,56 @@ def _employee(root: Path, employee_id: str) -> dict:
 
 
 def _owner_form_employee_id(root: Path, form_id: str) -> str | None:
-    """Return the ledger employee bound to a native owner form, if any."""
+    """Locate an old detached-form receipt for compatibility diagnostics only."""
     for employee in _employees(root):
         if employee.get("owner_form", {}).get("form_id") == form_id:
             return employee["employee_id"]
     return None
+
+
+@mutation
+def send_supervisor_message(workspace: str | Path, text: str) -> tuple[dict, int]:
+    """Admit owner input to the bound *real* session; never claim execution."""
+    root, campaign = _root(workspace)
+    manifest = _load_manifest(root, campaign)
+    directory = manifest.get("supervisor_session_directory")
+    if not directory:
+        raise common.PipelineError("上司尚未绑定实际会话，消息未发送。")
+    runtime = topify_opencode.supervisor_runtime(directory, root, manifest)
+    if not runtime.get("can_chat"):
+        raise common.PipelineError(runtime.get("reason", "无法核验上司会话"))
+    message, _ = send_message(root, "supervisor", manifest["supervisor_id"], text)
+    prompt = (
+        f"Owner Web message {message['message_id']}\nCampaign scope: {root}\n"
+        f"Ledger message: {root / 'supervision/messages' / ('supervisor--' + manifest['supervisor_id'])}\n"
+        "You are the bound supervisor for this campaign. Read its locked requirements and current evidence. "
+        "Reply in this actual OpenCode session. A ledger write or Form ID is not execution. "
+        "If an owner policy decision is truly needed, use the native question TOOL and await its answer; "
+        "never create an unattached Form using shell/API or ask the owner to approve every child completion. "
+        "Explain the specific finding, affected task and the action each choice permits. "
+        "Acceptance/approval does not require an owner reason; do not add a mandatory explanation field. "
+        "After a native answer, execute only its scoped lawful next step, retain action receipts, "
+        "and report what actually ran. Seed/helper/QC-1 routine handling is your responsibility. "
+        "Do not treat this ordinary message as a response to another native question or waive technical gates.\n\n"
+        + text
+    )
+    try:
+        admitted = topify_opencode.send_message(directory, runtime["session_id"], prompt)
+    except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
+        _append(root, "supervisor_message_delivery_failed", message_id=message["message_id"],
+                session_id=runtime["session_id"], status="unconfirmed")
+        raise common.PipelineError("消息留存在台账，但无法确认 OpenCode 接收；没有执行证据，请勿盲目重发。") from exc
+    receipt = {
+        "schema_version": 1, "message_id": message["message_id"],
+        "session_id": runtime["session_id"], "status": "admitted",
+        "inbox_id": admitted.get("response", {}).get("data", {}).get("id"),
+        "recorded_at": common.utc_now(), "execution_status": "awaiting-agent-action",
+    }
+    receipt["delivery_sha256"] = common.canonical_sha256(receipt)
+    number, attempt = common.next_attempt(root / "supervision/session-deliveries")
+    common.write_new_json(attempt / "delivery.json", receipt)
+    _append(root, "supervisor_session_message_sent", **receipt)
+    return {**receipt, "note": "已提交真实上司会话；请查看其回复与工具调用，接收不等于执行完成。"}, 0
 
 
 def _tree(root: Path, employee_id: str) -> list[dict]:
@@ -649,6 +695,7 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
             "phase": employee.get("phase"),
             "hardening_revision": employee.get("hardening_revision"),
             "execution_status": employee.get("execution_status"),
+            "legacy_owner_form": employee.get("owner_form"),
             "report": _report_summary(root, employee),
             "qc": employee.get("last_qc_decision"),
             "rollout_gate": gate,
@@ -669,6 +716,8 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
                 "kind": "employee-state",
                 "employee_id": employee["employee_id"],
                 "status": employee["employment_status"],
+                "responsible": "supervisor",
+                "report": row["report"],
             })
         if gate is not None and gate.get("status") not in {"CONTINUE", "ACCEPT"}:
             alerts.append({
@@ -685,6 +734,11 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
         "schema_version": 1,
         "campaign": str(root),
         "generated_at": common.utc_now(),
+        "supervisor_binding": {
+            "session_id": manifest.get("supervisor_session_id"),
+            "directory": manifest.get("supervisor_session_directory"),
+            "bound_at": manifest.get("supervisor_session_bound_at"),
+        },
         "capacity": {
             "active": _active_count(root),
             "max_concurrent": manifest["max_concurrent"],
@@ -1300,8 +1354,8 @@ def owner_decision(
     employee = _employee(root, employee_id)
     evidence_path = _regular_file(evidence, "owner decision evidence") if evidence else None
     allowed = {
-        "approve_rollout": {"rollout-pending", "awaiting-approval"},
-        "reject_rollout": {"rollout-pending", "awaiting-approval"},
+        "approve_rollout": {"rollout-pending"},
+        "reject_rollout": {"rollout-pending"},
         "accept_exception": {"needs-owner-decision"},
         "fire": {"needs-owner-decision", "replacement-required", "repair-required"},
     }
@@ -1309,6 +1363,17 @@ def owner_decision(
         raise common.PipelineError(
             f"decision {decision} is not valid for employee state {employee.get('employment_status')}"
         )
+    if decision in {"approve_rollout", "reject_rollout", "accept_exception"}:
+        if employee.get("role") != "producer":
+            raise common.PipelineError("子任务或质检员不是 rollout 批准对象，应由上司处理其阶段报告。")
+        qc = employee.get("last_qc_decision") or {}
+        if decision == "approve_rollout" and (
+            employee.get("hardening_revision") != 2 or
+            (qc.get("decision") != "pass" and not employee.get("qc_exception"))
+        ):
+            raise common.PipelineError("先完成 r2 和独立 QC；通用接受选项不能代替技术门槛。")
+        if decision == "accept_exception" and not qc:
+            raise common.PipelineError("没有具体 QC 例外凭证；普通阻塞不能直接转为 rollout-pending。")
     receipt = {
         "schema_version": 1,
         "employee_id": employee_id,
@@ -1338,63 +1403,25 @@ def owner_decision(
 
 @mutation
 def create_owner_form(workspace: str | Path, employee_id: str, note: str = "") -> tuple[dict, int]:
+    """Compatibility name: request a real supervisor review, not an API Form."""
     root, campaign = _root(workspace)
     manifest = _load_manifest(root, campaign)
-    session_id = manifest.get("supervisor_session_id")
-    if not session_id:
-        raise common.PipelineError("先绑定该 campaign 的 supervisor OpenCode session")
+    if manifest.get("supervisor_session_id") and os.environ.get("OPENCODE_SESSION_ID") == manifest["supervisor_session_id"]:
+        raise common.PipelineError("你就是绑定的上司：请直接调用原生 question 工具并等待答案，不要给自己递归发送审查请求。")
     employee = _employee(root, employee_id)
-    if employee.get("employment_status") not in {"rollout-pending", "awaiting-approval", "needs-owner-decision", "replacement-required", "repair-required"}:
-        raise common.PipelineError("该员工当前没有待负责人审批的台账状态")
-    current_form = employee.get("owner_form")
-    if current_form and current_form.get("status") == "pending":
-        existing = None
-        try:
-            existing = topify_opencode._get(
-                f"/api/session/{current_form['session_id']}/form/{current_form['form_id']}"
-            ).get("data", {})
-        except (common.PipelineError, OSError, ValueError, TypeError):
-            # Native forms are live OpenCode objects. A restarted/finished
-            # session can discard one while the durable ledger still says
-            # pending; in that case the supervisor may recreate it.
-            pass
-        if isinstance(existing, dict) and existing.get("id") == current_form.get("form_id"):
-            note_field = next((field for field in existing.get("fields", []) if field.get("key") == "note"), None)
-            if note_field is not None and note_field.get("required") is False:
-                return current_form, 0
-            try:
-                topify_opencode.cancel_form(
-                    current_form["session_id"], current_form["form_id"],
-                    "Superseded: acceptance note is optional."
-                )
-            except (common.PipelineError, OSError, ValueError, TypeError):
-                pass
-        _save_employee(root, {**employee, "owner_form": {**current_form, "status": "superseded"}})
-    options = [{"value": "accept_exception", "label": "接受例外", "description": "保留该员工并允许继续。"},
-               {"value": "fire", "label": "淘汰员工子树", "description": "封存员工和子任务，后续换 Seed。"}]
-    if employee.get("employment_status") in {"rollout-pending", "awaiting-approval"}:
-        options = [{"value": "approve_rollout", "label": "批准模型试跑", "description": "允许 producer 执行已批准的 rollout。"},
-                   {"value": "reject_rollout", "label": "退回本次试跑", "description": "不启动本次 rollout。"}, *options]
-    payload = {
-        "title": f"生产审批 · {employee_id}",
-        "metadata": {"edgebench": {"kind": "owner-decision", "employee_id": employee_id, "campaign": str(root)}},
-        "fields": [
-            {"key": "decision", "type": "string", "title": "请选择处理方式", "required": True, "options": options, "custom": False},
-            {"key": "note", "type": "string", "title": "处理说明（批准/接受可留空）", "description": note or "批准/接受可以不填写；退回或淘汰时请说明理由。", "required": False, "minLength": 0, "maxLength": 20000},
-        ],
-    }
-    result = topify_opencode._post(f"/api/session/{session_id}/form", payload)
-    form = result.get("data", result)
-    if not isinstance(form, dict) or not form.get("id"):
-        raise common.PipelineError("OpenCode 未返回原生审批问题")
-    receipt = {"form_id": form["id"], "session_id": session_id, "employee_id": employee_id,
-               "created_at": common.utc_now(), "status": "pending", "form_sha256": common.canonical_sha256(form)}
-    number, attempt = common.next_attempt(root / "supervision/decisions" / employee_id)
-    receipt["attempt"] = number
-    common.write_new_json(attempt / "owner-form.json", receipt)
-    _save_employee(root, {**employee, "owner_form": receipt})
-    _append(root, "owner_form_created", employee_id=employee_id, form_id=form["id"], form_sha256=receipt["form_sha256"])
-    return {**receipt, "form": form}, 0
+    if employee.get("employment_status") in {"fired", "complete"}:
+        raise common.PipelineError("该员工已结束，不能请求新的生产审批。")
+    report = _report_summary(root, employee) or {}
+    text = (
+        f"请实际审查员工 {employee_id}，不要创建通用接受/淘汰表单。\n"
+        f"当前角色/阶段/台账状态：{employee.get('role')} / {employee.get('phase')} / {employee.get('employment_status')}\n"
+        f"报告：{report.get('report_path')}\n摘要：{report.get('summary', '未报告')}\n"
+        "常规子任务收尾、Seed 审核和 QC-1 修复由你处理并给出依据。"
+        "只有具体的资源/政策或有效 rollout 门槛需要负责人时，才用原生 question 工具等待回答。"
+        "询问必须说明证据、选项后果和下一项实际操作。没有当前冻结和全部技术凭证不得放行试跑。"
+        "本次请求本身不批准 rollout、不接受 QC 例外、不淘汰员工。\n" + note
+    )
+    return send_supervisor_message(root, text)
 
 
 @mutation
@@ -1415,21 +1442,10 @@ def sync_owner_form(workspace: str | Path, employee_id: str) -> tuple[dict, int]
     ref = employee.get("owner_form")
     if not isinstance(ref, dict) or not ref.get("form_id"):
         raise common.PipelineError("该员工没有原生审批问题")
-    form = topify_opencode._get(f"/api/session/{ref['session_id']}/form/{ref['form_id']}").get("data", {})
-    state = form.get("state", {})
-    if state.get("status") == "pending":
-        return {"status": "pending", "form": form}, 0
-    if state.get("status") != "answered":
-        return {"status": state.get("status", "unknown"), "form": form}, 0
-    answer = state.get("answer", {})
-    if answer.get("decision") not in {"approve_rollout", "reject_rollout", "accept_exception", "fire"}:
-        raise common.PipelineError("原生审批问题的回答不完整")
-    note = answer.get("note", "")
-    if answer["decision"] in {"reject_rollout", "fire"} and not _text(note):
-        raise common.PipelineError("退回或淘汰必须填写说明")
-    result, _ = owner_decision(root, employee_id, answer["decision"], note or "Owner approved without additional note.")
-    _save_employee(root, {**_employee(root, employee_id), "owner_form": {**ref, "status": "synced", "synced_at": common.utc_now(), "answer": answer}})
-    return {"status": "synced", "result": result}, 0
+    raise common.PipelineError(
+        "旧 owner-form 是脱离 Agent 等待工具的表单，不能同步为生产批准。"
+        "请请求真实上司审查；原生 question 回答由上司继续执行并记录具体动作。"
+    )
 
 
 def _metric(observations: dict, metric: str, entries: list[dict]) -> float | None:
