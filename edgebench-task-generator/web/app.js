@@ -16,6 +16,7 @@
     'pending':'待回答', 'answered':'已回答', 'cancelled':'已取消',
     'healthy':'心跳正常', 'heartbeat-missed':'心跳超时', 'stalled':'疑似停工',
     'waiting':'等待阶段',
+    'standby':'负责人批准待命', 'held-owner':'等待负责人，通道已关闭',
     'succeeded':'已完成', 'failed':'失败', 'interrupted':'已中断',
     'pass':'通过', 'fail':'不通过', 'repair_required':'待修复', 'pass_with_exception':'有例外待审批',
     'heartbeat':'心跳', 'completed':'阶段完成', 'blocked':'阻塞', 'question':'提问',
@@ -125,6 +126,19 @@
       ? `${supervisor.title || '已绑定上司'} · ${supervisor.session_id} · 实际 Agent：${label(supervisor.agent)}`
       : '本批次没有绑定真实上司会话。';
     $('supervisor-note').textContent = `${supervisor.reason || ''} 最近实际活动：${ago(supervisor.updated_at)}。查看不会唤醒；发送消息才会恢复该会话。`;
+    const gate=value.communication_control || {worker_channel_open:true};
+    if(gate.permissions_guarded) $('health').textContent='负责人接管（只读）';
+    $('owner-control-status').textContent=gate.worker_channel_open ? '上下级自动沟通通道：开启' : '上下级自动沟通通道：已关闭；负责人消息和原生回答仍可用';
+    $('owner-control-reason').textContent=`${gate.reason || '上司需要你决定时，自动关闭员工/告警投递和员工派发。'} ${gate.permissions_guarded ? '同一上司会话已启用原生只读权限，不能发命令或派子任务。' : ''} 恢复不会回放历史告警，也不批准任何候选。`;
+    $('owner-pause').disabled=Boolean(gate.owner_paused);
+    $('owner-resume').disabled=!gate.owner_paused;
+    const actions={close_candidate:'关闭候选',shelve_seed:'搁置种子',replace_seed:'更换种子',fire:'淘汰员工',standby:'转为待命'};
+    $('owner-request-list').innerHTML=(value.owner_requests || []).map(r=>`<article class="owner-request"><h3>${esc(r.employee_id)} · 待你决定：${esc(actions[r.action] || r.action)}</h3><p>${esc(r.reason)}</p><p class="form-hint">证据：${esc(r.report_path)}<br>SHA-256：${esc(r.report_sha256)}<br>提案：${esc(r.request_id)}</p><p class="form-hint">本提案尚未执行。上司应提交真实原生 question 等待你的选择。</p></article>`).join('');
+    const boundWorker=selection?.sessionId && employees.some(e=>e.session_id===selection.sessionId || (e.children || []).some(c=>c.session_id===selection.sessionId));
+    if(boundWorker && !gate.worker_channel_open) {
+      $('employee-chat-input').disabled=true; $('employee-chat-send').disabled=true;
+      $('employee-chat-status').textContent='负责人已关闭上下级通道；员工消息暂不投递，可直接联系上司。';
+    }
     $('supervisor-inspect').disabled = !supervisor.can_chat;
     document.querySelector('.supervisor-panel').classList.toggle('warning', supervisor.status !== 'running');
     $('command-input').disabled = !supervisor.can_chat;
@@ -224,9 +238,10 @@
       $('dispatch-worker').hidden = false; $('fire-worker').hidden = false;
       $('dispatch-worker').disabled = !data?.supervisor_runtime?.can_chat || ['fired','complete'].includes(employee.status);
       $('fire-worker').disabled = !data?.supervisor_runtime?.can_chat;
-      $('employee-chat-input').disabled = !employee.runtime?.can_chat; $('employee-chat-send').disabled = !employee.runtime?.can_chat;
+      const canChat=employee.runtime?.can_chat && data?.communication_control?.worker_channel_open !== false;
+      $('employee-chat-input').disabled = !canChat; $('employee-chat-send').disabled = !canChat;
       $('employee-chat-input').value = ''; $('detail-messages').textContent = '';
-      $('employee-chat-status').textContent = employee.runtime?.can_chat ? '消息提交到此员工的实际会话；原生问题请在“待回答”中选择。' : '未核验可操纵会话，不能直接发送。';
+      $('employee-chat-status').textContent = canChat ? '消息提交到此员工的实际会话；原生问题请在“待回答”中选择。' : data?.communication_control?.worker_channel_open === false ? '负责人已关闭上下级通道；员工消息暂不投递，可直接联系上司。' : '未核验可操纵会话，不能直接发送。';
       openTab(tab);
       await Promise.all([
         tab === 'chat' ? refreshChat() : Promise.resolve(),
@@ -394,6 +409,21 @@
   document.querySelector('.inspector-backdrop').addEventListener('click',closeInspector);
   document.querySelectorAll('.inspector-tab').forEach(b=>b.addEventListener('click',()=>openTab(b.dataset.tab)));
   $('supervisor-inspect').addEventListener('click',()=>showSession(data?.supervisor_runtime?.session_id));
+  async function ownerControl(action) {
+    if(!scope) return;
+    if(!window.confirm(action==='pause' ? '关闭本批次自动上下级投递，并中断非提问中的上司？员工和证据保留，负责人消息仍可发送。' : '恢复上下级通道？尚未决定的提案/原生问题仍保持关闭；不会重放历史消息或自动批准候选。')) return;
+    const captured=scope;
+    $('owner-pause').disabled=true; $('owner-resume').disabled=true;
+    try {
+      const value=await api('/api/owner-control',{method:'POST',body:JSON.stringify({supervisor_id:captured,action})});
+      if(captured===scope) {
+        setConnection(value.worker_channel_open ? '负责人允许恢复通道；未启动员工' : '上下级通道已关闭，请直接联系上司');
+        await refresh();
+      }
+    } catch(error) {setConnection(error.message,true);await refresh();}
+  }
+  $('owner-pause').addEventListener('click',()=>ownerControl('pause'));
+  $('owner-resume').addEventListener('click',()=>ownerControl('resume'));
   $('command-open').addEventListener('click',openSupervisorChat);
   $('command-close').addEventListener('click',()=>$('command-modal').classList.add('hidden'));
   $('command-form').addEventListener('submit',async event=>{

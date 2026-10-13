@@ -73,6 +73,15 @@ fires or kills a worker. The Supervisor must inspect/contact/resume or escalate
 the employee and record the action; a ledger `running` state is not proof of
 life.
 
+The owner decides candidate closure/shelving, Seed replacement, firing and
+standby. A negative probe is a recommendation, not that decision. Submit an
+evidence-bound `owner-request` and ask a real native question. Pending owner
+questions/requests close both worker-to-supervisor automatic delivery and
+supervisor-to-worker directives/dispatch; reports remain durable and owner chat
+stays available. The owner can independently pause/resume this gate in Web.
+Resume does not replay old lifecycle messages or approve pending proposals.
+Do not create endless standby/heartbeat loops when there is no current work.
+
 ## Chat-first dispatch
 
 When the owner says “派发出题下属”, “启动一批题目”, “create producers”, or

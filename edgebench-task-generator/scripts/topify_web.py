@@ -20,6 +20,7 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 import topify_common as common
+import topify_control as control
 import topify_opencode
 import topify_registry
 import topify_seed
@@ -192,6 +193,18 @@ class SupervisorContext:
         if not session_id or session_id not in sessions:
             raise common.PipelineError("此会话未绑定本 campaign，不能通过生产控制台提交决定。")
 
+    def guard_session_message(self, session_id: str) -> None:
+        if any(e.get("session_id") == session_id for e in topify_supervisor._employees(self.root)):
+            control.require_worker_channel(self.root)
+
+    def sync_owner_gate(self) -> dict:
+        manifest = common.load_json(self.root / "supervision/manifest.json")
+        sid = manifest.get("supervisor_session_id")
+        if sid:
+            forms = topify_opencode.pending_forms(self.session_directory, session_id=sid)
+            return control.sync_forms(self.root, forms.get("forms", []))
+        return control.state(self.root)
+
     def record_native_reply(self, result: dict, answer: dict) -> dict:
         directory = self.root / "supervision/native-interactions" / result["form_id"]
         number, attempt = common.next_attempt(directory)
@@ -203,6 +216,11 @@ class SupervisorContext:
         }
         receipt["reply_sha256"] = common.canonical_sha256(receipt)
         common.write_new_json(attempt / "reply.json", receipt)
+        control.resolve_native(self.root, result["consumer"], answer, attempt / "reply.json")
+        value = control.state(self.root)
+        if result["form_id"] in value.get("native_form_ids", []):
+            forms = [{"form_id": fid, "can_reply": True} for fid in value["native_form_ids"] if fid != result["form_id"]]
+            control.sync_forms(self.root, forms)
         topify_supervisor._append(self.root, "native_question_answered", form_id=result["form_id"],
                                   session_id=result["session_id"], reply_sha256=receipt["reply_sha256"],
                                   execution_status="awaiting-agent-action")
@@ -404,6 +422,14 @@ class ConsoleState:
         results = []
         for context in list(self.contexts.values()):
             try:
+                gate = context.sync_owner_gate()
+                if not gate["worker_channel_open"]:
+                    results.append({"supervisor_id": context.supervisor_id, "status": "held-owner"})
+                    continue
+                manifest = common.load_json(context.root / "supervision/manifest.json")
+                if not manifest.get("supervisor_session_id"):
+                    results.append({"supervisor_id": context.supervisor_id, "status": "unbound-supervisor"})
+                    continue
                 value, _ = topify_supervisor.watch(context.root, active=active)
                 results.append({"supervisor_id": context.supervisor_id, **value})
             except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
@@ -660,6 +686,18 @@ class ConsoleHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         try:
+            if parsed.path == "/api/owner-control":
+                body = self._body()
+                auth = self._require("owner", body.get("supervisor_id"))
+                context = self._context(auth, body.get("supervisor_id"))
+                if body.get("action") == "pause":
+                    result = control.pause(context.root, body.get("reason", "负责人暂停并接管上司"))
+                elif body.get("action") == "resume":
+                    result = control.resume(context.root)
+                else:
+                    raise common.PipelineError("owner-control action must be pause or resume")
+                self._respond(200, result)
+                return
             if parsed.path == "/api/dispatch":
                 body = self._body()
                 auth = self._require(supervisor_id=body.get("supervisor_id"))
@@ -754,6 +792,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 body = self._body()
                 auth = self._require(supervisor_id=body.get("supervisor_id"))
                 context = self._context(auth, body.get("supervisor_id"))
+                context.guard_session_message(body["session_id"])
                 result = topify_opencode.send_message(
                     context.session_directory, body["session_id"], body["text"]
                 )
@@ -778,6 +817,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 body = self._body()
                 auth = self._require(supervisor_id=body.get("supervisor_id"))
                 context = self._context(auth, body.get("supervisor_id"))
+                control.require_worker_channel(context.root)
                 employee = topify_supervisor._employee(context.root, body["employee_id"])
                 runtime = topify_opencode.employee_runtime(employee)
                 if not runtime["can_chat"]:

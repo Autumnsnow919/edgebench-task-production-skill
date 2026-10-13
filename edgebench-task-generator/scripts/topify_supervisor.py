@@ -16,6 +16,7 @@ import re
 import subprocess
 
 import topify_common as common
+import topify_control as control
 from topify_ledger_lock import mutation
 import topify_dedup
 import topify_opencode
@@ -39,6 +40,7 @@ EMPLOYEE_STATES = frozenset({
     "rollout-pending", "rollout-running", "awaiting-approval",
     "needs-owner-decision", "replacement-required", "complete", "fired",
     "hardening-r1-required", "hardening-r2-required", "dispatch-created",
+    "standby",
 })
 REPORT_STATES = frozenset({"heartbeat", "completed", "blocked", "failed", "question"})
 QC_STATES = frozenset({"pass", "repair_required", "fail", "pass_with_exception"})
@@ -648,6 +650,8 @@ def record_qc_owner_answer(workspace: str | Path, producer_id: str, decision: st
 def _deliver_to_supervisor(root: Path, text: str, sender_type: str,
                            sender_id: str, subject: str = "", message: dict | None = None) -> dict:
     """Deliver subordinate/watchdog input to the bound real Supervisor session."""
+    if not control.state(root)["worker_channel_open"]:
+        return {"status": "held-owner", "reason": "上下级自动沟通已关闭，报告留存，等待负责人。"}
     manifest = common.load_json(root / "supervision/manifest.json")
     session_directory = manifest.get("supervisor_session_directory")
     if not session_directory or not manifest.get("supervisor_session_id"):
@@ -729,6 +733,10 @@ def send_supervisor_message(workspace: str | Path, text: str) -> tuple[dict, int
         "Let the owner accept a scoped exception without a reason, authorize further repair, or explicitly terminate. "
         "and report what actually ran. Seed/helper/QC-1 routine handling is your responsibility. "
         "Do not treat this ordinary message as a response to another native question or waive technical gates.\n\n"
+        f"Owner communication gate: {json.dumps(control.state(root), ensure_ascii=False)}.\n"
+        "If this gate is closed, speak only to the owner and use native question if necessary. "
+        "Do not contact/hire/dispatch workers, emit standby commands, close/shelve candidates or replace Seeds. "
+        "Candidate closure/shelving/standby/termination require owner-request and an actual owner answer, not your own verdict.\n\n"
         + text
     )
     try:
@@ -776,6 +784,21 @@ def _active_count(root: Path) -> int:
 
 
 @mutation
+def candidate_disposition(workspace: str | Path, employee_id: str, action: str) -> tuple[dict, int]:
+    root, campaign = _root(workspace)
+    _load_manifest(root, campaign)
+    if action not in {"close_candidate", "standby"}:
+        raise common.PipelineError("candidate disposition must be close_candidate or standby")
+    control.require_disposition(root, employee_id, action)
+    employee = _employee(root, employee_id)
+    value = {**employee, "employment_status": "standby", "phase": "owner-approved-standby",
+             "owner_disposition": action, "pending_owner_request": None, "disposition_at": common.utc_now()}
+    _save_employee(root, value)
+    _append(root, "owner_candidate_disposition_applied", employee_id=employee_id, action=action)
+    return value, 0
+
+
+@mutation
 def hire(
     workspace: str | Path,
     employee_id: str,
@@ -790,6 +813,7 @@ def hire(
 ) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     manifest = _load_manifest(root, campaign)
+    control.require_worker_channel(root)
     _supervision_root(root)
     employee_id = _id(employee_id, "employee_id")
     if role not in ROLES:
@@ -888,8 +912,12 @@ def _employment_prompt(root: Path, manifest: dict, employee: dict) -> str:
                 f"Read the production Skill: {bundle / '.opencode/skills/edgebench-task-production/SKILL.md'}\n"
                 f"Read the locked contract: {root / 'requirements-profile-lock.json'} (if present).\n"
                 "Use absolute paths to your job_root for tool working directories and all staged writes. "
-                "Shared campaign, dedup registry and other employees are read-only. "
-                "The supervisor alone collects proposals and writes shared state.\n")
+                 "Shared campaign, dedup registry and other employees are read-only. "
+                 "Only the named employee-report/message calls may append your shared telemetry; "
+                 "the supervisor alone writes shared task state. Candidate closure, shelving, Seed change, "
+                 "termination/replacement or standby require the owner's prior decision. When the owner "
+                 "communication gate is closed, keep evidence/reports but do not route lifecycle prompts "
+                 "or silently stop the task; wait for the explicit owner decision.\n")
     if employee["role"] == "producer":
         return identity + (
             "You own exactly ONE complete task, not a scout job. Begin by discovering and pinning "
@@ -1098,6 +1126,8 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
             "directory": manifest.get("supervisor_session_directory"),
             "bound_at": manifest.get("supervisor_session_bound_at"),
         },
+        "communication_control": control.state(root),
+        "owner_requests": control.requests(root),
         "capacity": {
             "active": _active_count(root),
             "max_concurrent": manifest["max_concurrent"],
@@ -1119,6 +1149,7 @@ def fire(workspace: str | Path, employee_id: str, reason: str, evidence: str | P
     if not _text(reason):
         raise common.PipelineError("termination reason must be nonempty")
     qc = value.get("last_qc_decision") or {}
+    owner_qc = value.get("owner_qc_resolution") or {}
     if value.get("role") == "producer" and qc.get("decision") in {"fail", "repair_required", "pass_with_exception"}:
         resolution = value.get("owner_qc_resolution") or {}
         bound = bool(qc.get("decision_sha256") and resolution.get("qc_decision_sha256") == qc["decision_sha256"])
@@ -1128,6 +1159,9 @@ def fire(workspace: str | Path, employee_id: str, reason: str, evidence: str | P
         ))
         if not allowed:
             raise common.PipelineError("QC 未通过不是自动淘汰条件。QC-1 先返修；QC-2 仍未通过必须交负责人，先记录负责人明确淘汰决定。")
+    if not (owner_qc.get("decision") == "fire" and qc.get("decision_sha256")
+            and owner_qc.get("qc_decision_sha256") == qc["decision_sha256"]):
+        control.require_disposition(root, employee_id, "fire")
     evidence_path = _regular_file(evidence, "termination evidence") if evidence else None
     evidence_sha256 = common.sha256_file(evidence_path) if evidence_path else None
     fired = []
@@ -1166,6 +1200,7 @@ def child_request(
 ) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     manifest = _load_manifest(root, campaign)
+    control.require_worker_channel(root)
     parent = _employee(root, parent_id)
     if parent.get("role") != "producer" or parent.get("employment_status") == "fired":
         raise common.PipelineError("child request parent must be an active producer")
@@ -1220,6 +1255,7 @@ def child_request(
 def dispatch(workspace: str | Path, employee_id: str, output: str | Path | None = None) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     manifest = _load_manifest(root, campaign)
+    control.require_worker_channel(root)
     employee = _employee(root, employee_id)
     if employee.get("employment_status") not in {"active", "queued", "repair-required"}:
         raise common.PipelineError("employee is not dispatchable in its current state")
@@ -1327,11 +1363,15 @@ def bind_session(workspace, employee_id, session_id, dispatch_id=None):
 def bind_seed(workspace, employee_id, seed_id, screen_receipt):
     root, campaign = _root(workspace)
     manifest = _load_manifest(root, campaign)
+    control.require_worker_channel(root)
     employee = _employee(root, employee_id)
     if employee["role"] != "producer" or employee.get("employment_status") == "fired":
         raise common.PipelineError("Seed binding needs a live producer")
-    if employee.get("seed_id") not in {None, seed_id} or employee.get("hardening_revision") is not None:
+    changing_seed = employee.get("seed_id") not in {None, seed_id}
+    if employee.get("hardening_revision") is not None:
         raise common.PipelineError("cannot silently change a producer's authored Seed")
+    if changing_seed:
+        control.require_disposition(root, employee_id, "replace_seed")
     topify_seed._safe_name(seed_id)
     path, receipt = _json_file(screen_receipt, "Seed screen receipt")
     if not path.is_relative_to(root) or receipt.get("seed_id") != seed_id:
@@ -1349,7 +1389,7 @@ def bind_seed(workspace, employee_id, seed_id, screen_receipt):
         former = _employee(root, employee["replacement_of"])
         if former.get("seed_id") == seed_id:
             raise common.PipelineError("replacement must use a new Seed")
-    claim = employee.get("dedup_claim")
+    claim = None if changing_seed else employee.get("dedup_claim")
     if claim is None:
         number, attempt = common.next_attempt(root / "supervision/seed-bindings" / employee_id)
         card_path = attempt / "seed-card.json"
@@ -1361,7 +1401,9 @@ def bind_seed(workspace, employee_id, seed_id, screen_receipt):
     evidence = {"seed_id": seed_id, "seed_sha256": current_hash,
                 "screen_receipt": str(path), "screen_sha256": common.sha256_file(path)}
     _save_employee(root, {**employee, "seed_id": seed_id, "dedup_claim": claim,
-                         "seed_binding": evidence, "phase": "authoring", "employment_status": "active"})
+                         "seed_binding": evidence, "phase": "authoring", "employment_status": "active",
+                         **({"previous_seed_binding": {"seed_id": employee.get("seed_id"),
+                                                       "binding": employee.get("seed_binding")}} if changing_seed else {})})
     _append(root, "producer_seed_bound", employee_id=employee_id, **evidence)
     return evidence, 0
 
@@ -1464,6 +1506,8 @@ def watch(workspace: str | Path, stale_after_seconds: int = HEARTBEAT_STALE_AFTE
     """
     root, campaign = _root(workspace)
     manifest = _load_manifest(root, campaign)
+    if not control.state(root)["worker_channel_open"]:
+        return {"status": "held-owner", "incident_count": 0, "incidents": []}, 0
     if type(stale_after_seconds) is not int or stale_after_seconds < 30:
         raise common.PipelineError("stale_after_seconds must be at least 30 seconds")
     if active is None:
@@ -1488,12 +1532,12 @@ def watch(workspace: str | Path, stale_after_seconds: int = HEARTBEAT_STALE_AFTE
         incident_key = common.canonical_sha256({
             "employee_id": employee["employee_id"],
             "session_id": employee.get("session_id"),
-            "health": health["status"],
             "report_sha256": report.get("report_sha256"),
+            "dispatch_id": employee.get("last_dispatch_id"),
         })
         pointer = watch_root / f"{employee['employee_id']}.json"
         previous = common.load_json(pointer) if pointer.is_file() and not pointer.is_symlink() else {}
-        if previous.get("incident_key") == incident_key and previous.get("status") == "admitted":
+        if previous.get("incident_key") == incident_key and previous.get("status") in {"admitted", "acknowledged"}:
             continue
         incident = {
             "schema_version": 1, "incident_key": incident_key,
@@ -1609,6 +1653,8 @@ def send_message(
         employee = _employee(root, sender_id)
         if employee.get("employment_status") == "fired":
             raise common.PipelineError("a fired employee cannot resume communication")
+    if target_type == "employee" and sender_type == "supervisor":
+        control.require_worker_channel(root)
     message, code = _persist_message(root, target_type, target_id, text, sender_type, sender_id, reply_to)
     if target_type == "supervisor" and sender_type == "employee":
         delivery = _deliver_to_supervisor(root, text, sender_type, sender_id,
@@ -2172,6 +2218,8 @@ def replace_seed(
     root, campaign = _root(workspace)
     _load_manifest(root, campaign)
     former = _employee(root, former_employee_id)
+    control.require_disposition(root, former_employee_id, "replace_seed")
+    control.require_worker_channel(root)
     if former.get("role") != "producer" or former.get("employment_status") != "fired":
         raise common.PipelineError("former employee must be a fired producer")
     if new_seed_id == former.get("seed_id") or not _text(new_seed_id):

@@ -805,6 +805,14 @@ def screen_seed(workspace: Path, seed_id: str, for_prototype: bool = False,
 
 def shelve_seed(workspace: Path, seed_id: str, reviewer_id: str, reason: str) -> tuple[dict, int]:
     root, _ = load_campaign(workspace)
+    if (root / "supervision/manifest.json").is_file():
+        import topify_control as control
+        owners = [common.load_json(p) for p in (root / "supervision/employees").glob("*.json") if p.name != "latest.json"]
+        owners = [e for e in owners if e.get("role") == "producer" and e.get("seed_id") == seed_id]
+        if not owners:
+            raise common.PipelineError("分层批次中搁置 Seed 必须先定位负责人和取得 Owner 决定。")
+        for employee in owners:
+            control.require_disposition(root, employee["employee_id"], "shelve_seed")
     decisions = root / "seed-family-decisions"
     if decisions.is_symlink() or decisions.exists() and not decisions.is_dir():
         raise common.PipelineError("seed-family-decisions must be a real directory")

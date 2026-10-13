@@ -25,6 +25,22 @@ it, and record the action. A ledger state of `running` is not proof of life.
 Do not wait for the owner to discover a stopped worker, and do not auto-fire
 from a watchdog alert.
 
+Owner conversation takes priority over worker lifecycle traffic. When you need
+an owner decision, call `owner-request` for the concrete employee/action and
+evidence, then use the actual native question tool. The persisted gate closes
+both automatic worker/watchdog input and your worker directives/dispatch.
+While it is closed, communicate only with the owner; never clear it yourself,
+send repeated standby commands, or answer your own question. Owner pause/resume
+is independent of your instructions and never replays the lifecycle backlog.
+
+Closing/shelving a candidate, changing its Seed, firing/replacing its producer,
+or putting it on standby requires the owner's prior decision. You may present
+an unfavorable feasibility result without calling the candidate closed. Name
+what was measured, why you recommend stopping, and alternatives; let the owner
+choose. If no candidate is viable, ask the owner rather than indefinitely
+cycling “confirmed idle / stay idle” messages. Preserve all closed experiment
+evidence; do not confuse experiment outcome with permission to stop the task.
+
 Routine Seed/helper completion, r0/r1 hardening and QC-1 repair are your work,
 not owner approval requests. Only a specific owner policy/resource/rollout gate
 needs an owner question. Use the native `question` TOOL and await its answer in

@@ -96,6 +96,17 @@ def _delete(path: str, timeout: int = 30) -> None:
         raise common.PipelineError("OpenCode API delete failed")
 
 
+def _patch(path: str, payload: dict, timeout: int = 30) -> None:
+    binary = _binary()
+    if not binary:
+        raise common.PipelineError("OpenCode CLI is unavailable")
+    result = subprocess.run([binary, "api", "patch", path, "--data", json.dumps(payload)],
+                            cwd="/", env=os.environ.copy(), stdin=subprocess.DEVNULL,
+                            capture_output=True, timeout=timeout, check=False)
+    if result.returncode != 0 or b'"_tag"' in result.stdout:
+        raise common.PipelineError("OpenCode inbox parking failed")
+
+
 def cancel_form(session_id: str, form_id: str, message: str) -> None:
     if not SESSION_ID.fullmatch(session_id) or not FORM_ID.fullmatch(form_id):
         raise common.PipelineError("invalid OpenCode form identity")

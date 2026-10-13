@@ -85,6 +85,18 @@ interfaces does not bypass firewall or network ACLs.
 
 ## Controls
 
+The owner has independent “暂停自动沟通并接管上司 / 恢复上下级通道” controls.
+Paused campaigns keep reports/evidence but do not deliver worker/watchdog input
+or allow directives/dispatch. Owner chat and real native answers remain open.
+The board shows the gate reason and pending candidate disposition proposals.
+Resume does not start workers, approve a candidate or replay old alerts.
+Owner questions automatically hold the channel, and a completed question
+answer is still distinct from an executed candidate disposition. Supervisor
+tokens cannot operate the owner pause/resume endpoint.
+Owner control also installs a native read-only permissions boundary on the
+same session; the session/model/history remain unchanged. Original rules are
+restored exactly on resume. No global OpenCode/location restart is required.
+
 The console shows the verified bound supervisor ID, agent, runtime status and
 real transcript. Owner messages and employee review requests use native prompt
 admission into that actual session; sending can resume an interrupted session,

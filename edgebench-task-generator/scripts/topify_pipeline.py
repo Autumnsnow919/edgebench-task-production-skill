@@ -10,6 +10,7 @@ import shutil
 import sys
 
 import topify_common as common
+import topify_control as control
 import topify_build
 import topify_candidate_audit
 import topify_completion
@@ -281,6 +282,25 @@ def parser() -> argparse.ArgumentParser:
     supervisor_watch = commands.add_parser("supervisor-watch", help="detect stale worker heartbeats and notify the bound supervisor")
     supervisor_watch.add_argument("workspace", type=Path)
     supervisor_watch.add_argument("--stale-after-seconds", type=int, default=topify_supervisor.HEARTBEAT_STALE_AFTER_SECONDS)
+    owner_request = commands.add_parser("owner-request", help="pause worker communication and submit a candidate disposition proposal to the owner")
+    owner_request.add_argument("workspace", type=Path)
+    owner_request.add_argument("--employee-id", required=True)
+    owner_request.add_argument("--action", choices=sorted(control.ACTION_LABELS), required=True)
+    owner_request.add_argument("--report", type=Path, required=True)
+    owner_request.add_argument("--reason", required=True)
+    owner_sync = commands.add_parser("owner-request-sync", help="verify a completed native question and record the owner's disposition")
+    owner_sync.add_argument("workspace", type=Path)
+    owner_sync.add_argument("--request-id", required=True)
+    reseed_chat = commands.add_parser("owner-reseed-chat", help="verify an explicit original owner reseed instruction without re-asking it")
+    reseed_chat.add_argument("workspace", type=Path)
+    reseed_chat.add_argument("--employee-id", required=True)
+    reseed_chat.add_argument("--report", type=Path, required=True)
+    reseed_chat.add_argument("--session-id", required=True)
+    reseed_chat.add_argument("--message-id", required=True)
+    disposition = commands.add_parser("candidate-disposition", help="apply an owner-approved candidate closure or standby")
+    disposition.add_argument("workspace", type=Path)
+    disposition.add_argument("--employee-id", required=True)
+    disposition.add_argument("--action", choices=("close_candidate", "standby"), required=True)
     supervisor_web = commands.add_parser("supervisor-web", help="serve the authenticated supervisor web console")
     supervisor_web.add_argument("workspace", type=Path, nargs="?")
     supervisor_web.add_argument("--host", default="0.0.0.0")
@@ -740,6 +760,14 @@ def main(argv: list[str] | None = None) -> int:
             report, code = topify_supervisor.dashboard(args.workspace, args.employee_id)
         elif args.command == "supervisor-watch":
             report, code = topify_supervisor.watch(args.workspace, args.stale_after_seconds)
+        elif args.command == "owner-request":
+            report, code = control.request(args.workspace, args.employee_id, args.action, args.report, args.reason), 0
+        elif args.command == "owner-request-sync":
+            report, code = {"resolutions": control.sync_request_answer(args.workspace, args.request_id)}, 0
+        elif args.command == "owner-reseed-chat":
+            report, code = control.record_reseed_chat(args.workspace, args.employee_id, args.report, args.session_id, args.message_id), 0
+        elif args.command == "candidate-disposition":
+            report, code = topify_supervisor.candidate_disposition(args.workspace, args.employee_id, args.action)
         elif args.command == "supervisor-web":
             report, code = topify_web.serve(
                 args.workspace, args.host, args.port, args.owner_token,

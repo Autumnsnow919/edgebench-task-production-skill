@@ -22,7 +22,7 @@ const qcReview={producer_id:'producer-fixture',round:2,decision:'repair_required
   findings:[{title:'Native ARM receipt missing',status:'incomplete',severity:'major',requirement:'native validation',evidence:'no receipt',impact:'parity unverified'}],
   notice:'QC-2 后仍未通过，保留员工等待负责人。不自动淘汰。'};
 const qcProducer={employee_id:'producer-fixture',parent_id:'supervisor',role:'producer',status:'needs-owner-decision',
-  transport:'opencode-task',job_root:'/fixture/producer',runtime:{status:'unbound',can_chat:false},qc_owner_review:qcReview};
+  transport:'opencode-task',job_root:'/fixture/producer',session_id:'ses_producerfixture1234567890',runtime:{status:'idle',can_chat:true},qc_owner_review:qcReview};
 const dashboard = {supervisor_id:'fixture', benchmark:'REHEARSAL', workspace:{campaign_id:'fixture'},
   supervisor_runtime:supervisor, employees:[qcProducer], workforce:{registered:1,runtime_running:0,unbound:1},
   alerts:[{employee_id:child,status:'needs-owner-decision',report:{summary:'fixture report'}},
@@ -44,6 +44,10 @@ const server = http.createServer(async (req, res) => {
     let raw=''; for await(const piece of req) raw+=piece;
     const body=JSON.parse(raw); posts.push({path:url.pathname,body});
     if(url.pathname==='/api/opencode-form-reply') {forms=[];return json({status:'answered',note:replyNote});}
+    if(url.pathname==='/api/owner-control') {
+      dashboard.communication_control={owner_paused:body.action==='pause',worker_channel_open:body.action!=='pause',reason:'fixture owner gate'};
+      return json(dashboard.communication_control);
+    }
     if(url.pathname==='/api/supervisor-review' || url.pathname==='/api/message') return json({status:'admitted',inbox_id:'msg_admitted'});
     res.writeHead(400);return res.end('{}');
   }
@@ -111,11 +115,25 @@ const server = http.createServer(async (req, res) => {
     await page.waitForFunction(()=>document.getElementById('command-result').textContent.includes('真实会话已接收'));
     assert.equal(posts.filter(p=>p.path==='/api/message').length,1);
     assert.equal(posts.filter(p=>p.path==='/api/owner-form-create').length,0);
+    await page.locator('#command-close').click();
+    await page.locator('#owner-pause').click();
+    await page.waitForFunction(()=>document.getElementById('owner-control-status').textContent.includes('已关闭'));
+    await page.locator('[data-review="producer-fixture"]').click();
+    await page.getByRole('button',{name:'对话',exact:true}).click();
+    assert.equal(await page.locator('#employee-chat-send').isDisabled(),true);
+    await page.locator('#close-detail').click();
+    await page.locator('#command-open').click();
+    assert.equal(await page.locator('#command-input').isDisabled(),false,'Owner can still contact supervisor while worker gate is closed');
+    await page.locator('#command-close').click();
+    await page.locator('#owner-resume').click();
+    await page.waitForFunction(()=>document.getElementById('owner-control-status').textContent.includes('开启'));
+    assert.equal(posts.filter(p=>p.path==='/api/owner-control').length,2);
     assert.deepEqual(errors,[]);
     console.log(JSON.stringify({status:'pass',mode:'browser-fixture',checks:[
       'interrupted supervisor visible','child report opens','duplicate radios isolated',
       'poll preserves selected answers','acceptance without reason','native reply only',
       'review asks supervisor instead of detached form','message targets actual supervisor',
-      'QC2 brief distinguishes incomplete from failed and shows closed repairs'],posts},null,2));
+      'QC2 brief distinguishes incomplete from failed and shows closed repairs',
+      'owner pause/resume visible and owner chat stays open'],posts},null,2));
   } finally {await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

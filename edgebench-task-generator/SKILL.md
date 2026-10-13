@@ -95,6 +95,19 @@ replaces an employee. The Supervisor must inspect, contact/resume or escalate
 the worker and record what happened. The Workforce card exposes
 `healthy`/`heartbeat-missed`/`stalled` instead of trusting `employment_status`.
 
+**Owner control of lifecycle decisions:** candidate closure/shelving, changing
+Seed, producer termination/replacement and standby require prior owner approval.
+Report a failed screen truthfully, but do not silently stop the task on that
+basis. Use `owner-request` with the employee, proposed action and a report
+path/hash, then ask the actual native question; see `references/supervisor-protocol.md`.
+While an owner request/question is pending, both directions of automated
+worker communication and dispatch are held. Telemetry/evidence is retained;
+owner chat and answers stay open. A separate Web owner pause also interrupts
+only the bound supervisor (unless preserving its pending question) and parks
+adapter worker inbox items. Resume does not replay lifecycle messages or
+approve a proposal. Do not treat ordinary idle as another reason to send a
+standby directive, which would wake the employee and generate another alert.
+
 If the owner requests a browser dashboard, read
 `references/supervisor-web.md` and start `supervisor-web` with authentication.
 The Web console is another view/control plane over the ledger, not a second

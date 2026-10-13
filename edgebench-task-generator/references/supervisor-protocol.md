@@ -45,6 +45,78 @@ employee to fired or kills a process. The Supervisor inspects the actual
 session, contacts/resumes the employee or escalates a concrete owner question.
 `running` in the ledger without a fresh report is not proof of life.
 
+### Owner-controlled communication gate
+
+`supervision/control.json` is the durable campaign gate. Owner pause closes
+both automatic worker/watchdog admission to the supervisor and directives/
+dispatch to workers. Reports remain receipts, owner messages and native answers
+remain available. A bound supervisor's live native question automatically
+closes the gate; a disposition request closes it immediately, before asking.
+The owner may pause/resume independently with the Web control. Pause interrupts
+only this bound supervisor when it is not already waiting on a native form;
+it parks known adapter worker prompts, archives their originals and cancels
+only their native inbox admission; owner/unrelated inputs stay untouched. The
+durable original/ledger is preserved without later draining the native backlog.
+It never stops the OpenCode service
+or deletes employee trees. Resume never wakes a worker or replays that backlog.
+Unanswered requests/questions still hold the gate after manual resume.
+
+The same bound session is also placed under native owner-only permissions:
+deny all actions except read/glob/grep/question (and an exact pending TUI
+answer-import command). Shell/edit/subagent and other mutation routes are not
+available to the agent during owner control. The prior session rules are stored
+in immutable control receipts and restored exactly when the gate opens; do not
+reset them to a permissive default. This uses per-session permission PATCH,
+not location reload, which would cancel pending questions/permissions globally.
+If an initialized gate pointer disappears, recover its journal but stay paused;
+missing original permission evidence must fail closed, not silently reopen.
+On the observed V2 server, `permissions: null` is a no-op. If the original
+session had no overrides, resume uses an empty rules list to restore Agent/
+global policy, not an allow-all rule. Nonempty original session rules are
+restored unchanged. Both cases were verified on isolated real native sessions.
+
+A watchdog incident is keyed by employee/session/dispatch/report identity,
+not transient idle/running state. Sending a directive cannot re-arm that same
+incident just by waking the worker. Do not infer that admitted messages were
+acknowledged or that an idle employee needs repeated standby instructions.
+
+The gate enforces these adapter/CLI/API boundaries, not an OS sandbox around an
+agent with arbitrary shell access. Direct untracked OpenCode prompts or raw
+file edits are outside it; the role contract forbids using them to bypass the
+owner. Only actual recorded transport/action evidence establishes execution.
+
+### Candidate closure and standby are owner decisions
+
+Negative experiments may be reported without terminating the candidate. Before
+closing/shelving a candidate/Seed, switching Seed, terminating/replacing its
+producer or putting it on standby, issue an evidence-bound owner proposal:
+
+```bash
+python3 edgebench-task-generator/scripts/topify_pipeline.py owner-request CAMPAIGN \
+  --employee-id producer-0007 --action close_candidate \
+  --report EMPLOYEE_JOB_ROOT/REVIEW.json --reason "State the measured weakness and alternatives"
+```
+
+This returns `request_id`, `request_sha256`, report identity and exact option
+labels; it does not close the candidate. Include both request IDs/hashes in the
+native question's text and use the returned choices. The Web verifies the
+actual question tool completion, records its answer and scoped disposition.
+For a native TUI answer, `owner-request-sync --request-id ...` imports the real
+completed tool output. `candidate-disposition --action close_candidate|standby`
+then requires that decision; `employee-fire`, Seed shelving and replacement
+also require the applicable owner decision. Old report/Seed/dispatch identities
+cannot reuse a permission. Choosing “补充证据再决定” leaves the gate closed.
+Do not reset history or call a failed probe an owner-approved closure.
+
+An already explicit owner instruction is not replaced by a new approval form.
+For a numbered reseed instruction, `owner-reseed-chat --employee-id ... --report
+... --session-id ... --message-id ...` verifies the original user message from
+the bound supervisor/current owner session and records a scoped Seed-change
+permission. It does not fire the producer, approve rollout or authorize future
+subjects. Before r0, an owner-approved new Seed may bind to that same producer;
+the old binding and all evidence remain. After authoring, scored identity
+changes still require a new identity rather than silently reusing scores.
+
 For a true owner gate, the supervisor calls the native `question` TOOL and
 waits. Web reply validates the form's tool message/ID and running tool state,
 then submits the answer to that tool. The same agent resumes, uses the answer
