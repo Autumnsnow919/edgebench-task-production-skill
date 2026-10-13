@@ -223,6 +223,16 @@ Then `qc-resolve --evidence <reply.json>` validates the subject and chosen
 operation. An unrelated task's answer, a different choice or a changed QC
 report cannot be reused. Acceptance and continued-repair notes are optional.
 
+An explicit owner instruction in the current native chat, such as “3和4都批准”,
+is also valid scoped acceptance; do not force the owner to answer again or invent
+a question-tool reply. `record_qc_owner_chat` verifies the actual current user
+message and binds the named employees' current QC/report hashes. Its evidence
+is labeled `opencode-owner-chat`, not a form answer. This narrow import only
+accepts current QC exceptions; it does not approve freeze, rollout, termination
+or future versions. `qc-resolve` re-verifies the original message when applying
+it. Questions, negations, assistant paraphrases and unrelated employee IDs are
+not authorization.
+
 ```bash
 python3 edgebench-task-generator/scripts/topify_pipeline.py \
   qc-owner-answer CAMPAIGN --producer-id producer-001 --decision continue_repair

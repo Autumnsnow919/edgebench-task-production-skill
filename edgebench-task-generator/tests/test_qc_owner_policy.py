@@ -192,6 +192,37 @@ class QCOwnerPolicyTests(unittest.TestCase):
             with self.assertRaises(common.PipelineError):
                 ledger.record_qc_owner_answer(self.campaign, "producer-review", "fire")
 
+    def test_explicit_chat_approval_binds_both_current_qc_subjects_without_fake_form(self):
+        self.qc2_failure()
+        current = ledger._employee(self.campaign, "producer-review")["last_qc_decision"]
+        for name in ("producer-0003", "producer-0004"):
+            employee, _ = ledger.hire(self.campaign, name, "producer", "opencode-task")
+            qc = {**current, "producer_id": name}
+            qc["decision_sha256"] = common.canonical_sha256(qc)
+            ledger._save_employee(self.campaign, {**employee, "hardening_revision": 2,
+                                      "employment_status": "needs-owner-decision", "last_qc_decision": qc})
+        source = "ses_ownerchat1234567890123456"
+        message = {"id": "msg_explicitapprove", "type": "user", "text": "3和4都批准啊", "time": {"created": 1000}}
+        with patch.dict(ledger.os.environ, {"OPENCODE_SESSION_ID": source}), \
+                patch.object(ledger.topify_opencode, "_visible_session", return_value={"directory": str(self.campaign)}), \
+                patch.object(ledger.topify_opencode, "_get", return_value={"data": message}):
+            receipt, _ = ledger.record_qc_owner_chat(self.campaign, ["producer-0003", "producer-0004"], source, message["id"])
+            self.assertEqual(receipt["source"], "opencode-owner-chat")
+            self.assertNotIn("answer", receipt)
+            self.assertFalse(receipt["rollout_authorized"])
+            for name in receipt["producer_ids"]:
+                result, _ = ledger.qc_resolve(self.campaign, name, "accept_exception", evidence=receipt["evidence_path"])
+                self.assertEqual(result["employee"]["employment_status"], "rollout-pending")
+                self.assertEqual(result["resolution"]["note"], "")
+                self.assertEqual(result["resolution"]["owner_authorization"]["message_id"], message["id"])
+                self.assertEqual(result["employee"]["last_qc_decision"]["decision"], "repair_required")
+
+    def test_chat_parser_does_not_infer_approval_from_question_or_negation(self):
+        for text in ("3和4不批准", "3和4都批准吗", "是不是3和4都批准", "以后3和4都批准"):
+            with self.assertRaises(common.PipelineError):
+                ledger._chat_approved_producers(text)
+        self.assertEqual(ledger._chat_approved_producers("3和4都批准啊"), {"producer-0003", "producer-0004"})
+
     def test_supervisor_token_cannot_accept_or_terminate_or_extend_qc(self):
         self.qc2_failure()
         state = topify_web.ConsoleState(self.campaign, "owner-test", "supervisor-test")

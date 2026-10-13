@@ -495,6 +495,30 @@ def _qc_owner_authorization(root: Path, producer: dict, decision: str, evidence:
     if not digest or common.canonical_sha256({k: v for k, v in receipt.items() if k != "reply_sha256"}) != digest:
         raise common.PipelineError("负责人回答回执身份不一致。")
     manifest = common.load_json(root / "supervision/manifest.json")
+    if receipt.get("source") == "opencode-owner-chat":
+        if (decision != "accept_exception" or receipt.get("decision") != decision
+                or receipt.get("status") != "approved"
+                or receipt.get("supervisor_session_id") != manifest.get("supervisor_session_id")):
+            raise common.PipelineError("聊天批准只能用于本次明确列出的 QC 例外接受，不授权其他操作。")
+        topify_opencode._visible_session(receipt["source_directory"], receipt["session_id"])
+        original = topify_opencode._get(
+            f"/api/session/{receipt['session_id']}/message/{receipt['message_id']}"
+        ).get("data", {})
+        if (original.get("id") != receipt["message_id"] or original.get("type") != "user"
+                or original.get("text") != receipt.get("message_text")
+                or common.canonical_sha256(original) != receipt.get("message_sha256")):
+            raise common.PipelineError("负责人原始聊天消息不能核验，不能用上司转述代替批准。")
+        approved = _chat_approved_producers(original["text"])
+        if approved != set(receipt.get("producer_ids", [])) or producer["employee_id"] not in approved:
+            raise common.PipelineError("该聊天没有明确批准当前员工。")
+        qc = producer.get("last_qc_decision") or {}
+        for scope in receipt.get("qc_owner_scopes", []):
+            if (scope.get("producer_id") == producer["employee_id"]
+                    and scope.get("qc_decision_sha256") == qc.get("decision_sha256")
+                    and scope.get("qc_report_sha256") == qc.get("report_sha256")):
+                return {"source": "opencode-owner-chat", "session_id": receipt["session_id"],
+                        "message_id": receipt["message_id"], "reply_sha256": digest}
+        raise common.PipelineError("聊天批准不属于当前 QC 身份，不能复用于下一版。")
     if receipt.get("status") != "answered" or receipt.get("session_id") != manifest.get("supervisor_session_id"):
         raise common.PipelineError("回答不属于绑定的实际监督会话。")
     qc = producer.get("last_qc_decision") or {}
@@ -506,6 +530,68 @@ def _qc_owner_authorization(root: Path, producer: dict, decision: str, evidence:
             return {"form_id": receipt.get("form_id"), "reply_sha256": digest,
                     "session_id": receipt["session_id"], "answer_key": scope["answer_key"]}
     raise common.PipelineError("负责人回答没有授权此员工、当前 QC 凭证和这一操作；不能把其他问题的回答套用过来。")
+
+
+def _chat_approved_producers(text: str) -> set[str]:
+    """Recognize an explicit numbered approval, never a question/negation."""
+    match = re.fullmatch(
+        r"\s*((?:producer-)?\d+(?:\s*(?:和|与|及|、|,|，|&)\s*(?:producer-)?\d+)*)"
+        r"\s*(?:都|全部)?\s*(?:批准|接受(?:指定)?例外)(?:啊|吧|了|。|！|!)*\s*",
+        text,
+    )
+    if not match:
+        raise common.PipelineError("负责人聊天不是明确的指定员工批准；不要推断或代填原生问题。")
+    return {f"producer-{int(number):04d}" for number in re.findall(r"\d+", match[1])}
+
+
+@mutation
+def record_qc_owner_chat(workspace: str | Path, producer_ids: list[str],
+                         session_id: str, message_id: str) -> tuple[dict, int]:
+    """Preserve an explicit owner approval from the current actual chat.
+
+    This is not a manufactured question answer. Only scoped QC acceptance is
+    supported; no freeze/rollout/termination is inferred from the chat.
+    """
+    root, campaign = _root(workspace)
+    manifest = _load_manifest(root, campaign)
+    if (not session_id or session_id != os.environ.get("OPENCODE_SESSION_ID")
+            or not topify_opencode.SESSION_ID.fullmatch(session_id)
+            or not re.fullmatch(r"msg_[a-zA-Z0-9]+", message_id)):
+        raise common.PipelineError("必须使用当前实际负责人会话的原始消息身份。")
+    info = topify_opencode._visible_session(Path.cwd(), session_id)
+    message = topify_opencode._get(f"/api/session/{session_id}/message/{message_id}").get("data", {})
+    if message.get("id") != message_id or message.get("type") != "user" or not isinstance(message.get("text"), str):
+        raise common.PipelineError("批准必须来自真实 user 消息，不能由 assistant 转述生成。")
+    approved = _chat_approved_producers(message["text"])
+    if approved != set(producer_ids):
+        raise common.PipelineError("指定员工集合必须和负责人原文一致。")
+    scopes = []
+    for producer_id in sorted(approved):
+        employee = _employee(root, producer_id)
+        qc = employee.get("last_qc_decision") or {}
+        if not _unresolved_qc_failure(employee, second_round_only=True) or employee.get("employment_status") != "needs-owner-decision":
+            raise common.PipelineError(f"{producer_id} 当前不是待负责人复核的 QC-2 对象。")
+        report = _regular_file(qc.get("report_path"), "QC report")
+        if common.sha256_file(report) != qc.get("report_sha256"):
+            raise common.PipelineError("当前 QC 报告已变更，不能沿用此前摘要的批准。")
+        scopes.append({"producer_id": producer_id, "qc_decision_sha256": qc["decision_sha256"],
+                       "qc_report_sha256": qc["report_sha256"]})
+    receipt = {
+        "schema_version": 1, "source": "opencode-owner-chat", "session_id": session_id,
+        "source_directory": info["directory"], "message_id": message_id,
+        "message_text": message["text"], "message_sha256": common.canonical_sha256(message),
+        "supervisor_session_id": manifest.get("supervisor_session_id"), "producer_ids": sorted(approved),
+        "status": "approved", "decision": "accept_exception", "note": "",
+        "qc_owner_scopes": scopes, "freeze_authorized": False, "rollout_authorized": False,
+        "delivery_authorized": False, "recorded_at": common.utc_now(),
+    }
+    receipt["reply_sha256"] = common.canonical_sha256(receipt)
+    _, attempt = common.next_attempt(root / "supervision/native-interactions" / f"chat-{message_id}")
+    path = attempt / "reply.json"
+    common.write_new_json(path, receipt)
+    _append(root, "qc_owner_chat_recorded", producer_ids=sorted(approved), session_id=session_id,
+            message_id=message_id, reply_sha256=receipt["reply_sha256"])
+    return {"evidence_path": str(path), **receipt}, 0
 
 
 @mutation
