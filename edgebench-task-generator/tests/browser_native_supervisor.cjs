@@ -15,9 +15,18 @@ const employee = {employee_id:child, parent_id:'producer-fixture', role:'seed-wo
   runtime:{status:'unbound', can_chat:false}, phase:'seed-review'};
 const supervisor = {session_id:sid, status:'interrupted', agent:'edgebench-supervisor',
   title:'Fixture supervisor', directory:'/fixture', can_chat:true, outcome:'interrupted'};
+const qcReview={producer_id:'producer-fixture',round:2,decision:'repair_required',severity:'major',
+  summary:'fixture: repairs closed; native evidence missing',report_integrity:'verified',
+  report_path:'/fixture/qc2.json',report_sha256:'fixture-hash',automatic_fire_allowed:false,
+  quality_checks:{Q1:'pass',Q3:'incomplete'},resolved_items:['trusted compilation fixed'],
+  findings:[{title:'Native ARM receipt missing',status:'incomplete',severity:'major',requirement:'native validation',evidence:'no receipt',impact:'parity unverified'}],
+  notice:'QC-2 后仍未通过，保留员工等待负责人。不自动淘汰。'};
+const qcProducer={employee_id:'producer-fixture',parent_id:'supervisor',role:'producer',status:'needs-owner-decision',
+  transport:'opencode-task',job_root:'/fixture/producer',runtime:{status:'unbound',can_chat:false},qc_owner_review:qcReview};
 const dashboard = {supervisor_id:'fixture', benchmark:'REHEARSAL', workspace:{campaign_id:'fixture'},
-  supervisor_runtime:supervisor, employees:[], workforce:{registered:0,runtime_running:0,unbound:0},
-  alerts:[{employee_id:child,status:'needs-owner-decision',report:{summary:'fixture report'}}],
+  supervisor_runtime:supervisor, employees:[qcProducer], workforce:{registered:1,runtime_running:0,unbound:1},
+  alerts:[{employee_id:child,status:'needs-owner-decision',report:{summary:'fixture report'}},
+    {employee_id:'producer-fixture',status:'needs-owner-decision',owner_review:qcReview}],
   opencode_sessions:{status:'ok',sessions:[supervisor],active_count:0}};
 let forms = [{form_id:'frm_fixture',session_id:sid,session_title:supervisor.title,title:'真实等待工具的测试问题',
   can_reply:true,interaction:'agent-question',metadata:{kind:'question',tool:{messageID:'msg_fixture',id:'call_fixture'}},
@@ -39,7 +48,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(400);return res.end('{}');
   }
   if(url.pathname==='/api/supervisors') return json({supervisors:[{supervisor_id:'fixture',benchmark:'REHEARSAL',workspace:{campaign_id:'fixture'}}]});
-  if(url.pathname==='/api/dashboard') return json(url.searchParams.has('employee_id') ? {...dashboard,employees:[employee]} : dashboard);
+  if(url.pathname==='/api/dashboard') return json(url.searchParams.has('employee_id') ? {...dashboard,employees:[url.searchParams.get('employee_id')===child?employee:qcProducer]} : dashboard);
   if(url.pathname==='/api/events') return json({events:[]});
   if(url.pathname==='/api/opencode-forms') return json({status:'ok',forms});
   if(url.pathname==='/api/supervisor-session') return json({status:'ok',session_id:sid,runtime:supervisor,messages:[{type:'assistant',text:'fixture 真实上司回复',created_at:Date.now()}]});
@@ -63,7 +72,15 @@ const server = http.createServer(async (req, res) => {
     await page.goto(`http://127.0.0.1:${server.address().port}/?supervisor_id=fixture`);
     await page.locator('#native-question-list .native-question').waitFor();
     assert.equal(await page.locator('#supervisor-status').textContent(),'已中断');
-    assert.equal(await page.getByRole('heading',{name:'等待上司处理'}).count(),1);
+    assert.equal(await page.getByRole('heading',{name:'上司处理与负责人复核'}).count(),1);
+    await page.locator('[data-review="producer-fixture"]').click();
+    await page.locator('.qc-owner-review').waitFor();
+    const qcText=await page.locator('.qc-owner-review').textContent();
+    assert.ok(qcText.includes('trusted compilation fixed'));
+    assert.ok(qcText.includes('Q3：证据未完成'));
+    assert.ok(qcText.includes('Native ARM receipt missing'));
+    assert.ok(qcText.includes('不自动淘汰'));
+    await page.locator('#close-detail').click();
     const boardChoice=page.locator('#native-question-list input[type=radio]').first();
     await boardChoice.check();
     await page.locator(`[data-review="${child}"]`).click();
@@ -98,6 +115,7 @@ const server = http.createServer(async (req, res) => {
     console.log(JSON.stringify({status:'pass',mode:'browser-fixture',checks:[
       'interrupted supervisor visible','child report opens','duplicate radios isolated',
       'poll preserves selected answers','acceptance without reason','native reply only',
-      'review asks supervisor instead of detached form','message targets actual supervisor'],posts},null,2));
+      'review asks supervisor instead of detached form','message targets actual supervisor',
+      'QC2 brief distinguishes incomplete from failed and shows closed repairs'],posts},null,2));
   } finally {await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

@@ -355,12 +355,16 @@ def parser() -> argparse.ArgumentParser:
     qc_decision.add_argument("--severity", choices=sorted(topify_supervisor.QC_SEVERITIES), required=True)
     qc_decision.add_argument("--report", required=True, type=Path)
     qc_decision.add_argument("--note", required=True)
-    qc_resolve = commands.add_parser("qc-resolve", help="record a supervisor/user decision on QC escalation")
+    qc_resolve = commands.add_parser("qc-resolve", help="record the owner's scoped exception, further repair or termination decision")
     qc_resolve.add_argument("workspace", type=Path)
     qc_resolve.add_argument("--producer-id", required=True)
     qc_resolve.add_argument("--decision", choices=sorted(topify_supervisor.QC_DECISIONS), required=True)
-    qc_resolve.add_argument("--note", required=True)
+    qc_resolve.add_argument("--note", default="")
     qc_resolve.add_argument("--evidence", type=Path)
+    qc_answer = commands.add_parser("qc-owner-answer", help="record a verified completed native question answer as QC owner evidence")
+    qc_answer.add_argument("workspace", type=Path)
+    qc_answer.add_argument("--producer-id", required=True)
+    qc_answer.add_argument("--decision", choices=sorted(topify_supervisor.QC_OWNER_CHOICES), required=True)
     owner_decision = commands.add_parser("owner-decision", help="approve or reject a production gate")
     owner_decision.add_argument("workspace", type=Path)
     owner_decision.add_argument("--employee-id", required=True)
@@ -795,6 +799,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.workspace, args.producer_id, args.decision,
                 args.note, args.evidence,
             )
+        elif args.command == "qc-owner-answer":
+            report, code = topify_supervisor.record_qc_owner_answer(args.workspace, args.producer_id, args.decision)
         elif args.command == "owner-decision":
             report, code = topify_supervisor.owner_decision(
                 args.workspace, args.employee_id, args.decision,

@@ -54,6 +54,17 @@ replacement and delivery. A separate QC employee must review the producer's
 task. In single-agent mode the current OpenCode session may still own the task
 directly; it must not treat an old sample package as a new task.
 
+QC-1 failure goes to producer repair. If repaired QC-2 still does not pass,
+hold the employee and evidence for the owner's review; no automatic `fired`
+because two QC rounds failed. Show specific findings, requirements, evidence,
+closed repairs, severity and impact, distinguishing failed from unverified
+checks and discretionary reviewer demands. The owner may accept a scoped
+exception without a reason, approve further repair/review, or explicitly fire.
+Retain original QC findings and scores even when an exception is accepted.
+The resolution requires the owner's real native-question answer receipt bound
+to the current QC hash; a supervisor note is not owner authorization. See
+`edgebench-task-generator/references/supervisor-protocol.md` for Web/TUI mapping.
+
 ## Chat-first dispatch
 
 When the owner says “派发出题下属”, “启动一批题目”, “create producers”, or
@@ -291,6 +302,13 @@ removed, but vendor Work/verifier no-network operation remains independently
 checked. ARM64 runs applicable build, NOP/reference, snapshot-repeat and
 cross-architecture checks; it does not repeat model rollout or Q1–Q7 review.
 No source copies, host architecture probes or fixtures prove a runtime pass.
+For this owner's ARM64 validation, the authorized native host is
+`ssh root@10.2.39.3` (confirmed 2026-10-13). Use an exclusive remote validation
+directory and the host's configured SForge executable; run actual task-bound
+ARM64 checks and keep their receipts. Successful SSH login does not certify a
+build or score. This address is internal Skill guidance only, never customer
+task/README/QC/archive content. Do not embed SSH credentials or alter unrelated
+remote services.
 Online builds of the delivered Work/Judge source contexts are allowed; no
 offline OCI or wheelhouse package is required. Pin build inputs and retain
 rebuild receipts. This does not waive the executed no-network runtime boundary.

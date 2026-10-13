@@ -22,7 +22,19 @@ Read this before interpreting older sample dossiers or source-contract notes.
   executes applicable Work/Judge builds, NOP/reference, fixed-snapshot repeats,
   native scoring and cross-architecture comparison. ARM64 does not duplicate
   the frontier-model rollout or main Q1–Q7 review. Historical emulated results
-  stay labeled as such and cannot certify native task scoring.
+   stay labeled as such and cannot certify native task scoring.
+- The owner confirmed `ssh root@10.2.39.3` as the native ARM64 validation route
+  on 2026-10-13. Use task-exclusive remote workspaces and the configured host
+  tools; retain actual build/scoring/repeat/parity receipts. Do not include this
+  internal endpoint or credentials in customer output, and do not treat host
+  connectivity as a task validation result.
+- QC-1 failure gets repair, not automatic termination. Repaired QC-2 still not
+  passing must be explained to the owner, including failures versus incomplete
+  evidence and any discretionary reviewer demands. Hold the producer and all
+  evidence; the owner chooses scoped exception, further repair or termination.
+  No automatic fire solely from QC failure count, and no silently lowered
+  requirements to improve yield. An accepted exception does not rewrite a
+  measured result or certify missing technical evidence.
 - Work/Judge construction may fetch digest-pinned bases and version-pinned
   packages online; offline OCI images or wheelhouses are not required in the
   customer ZIP. Runtime and scoring remain no-network and need executed

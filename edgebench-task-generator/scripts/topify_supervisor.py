@@ -42,7 +42,8 @@ EMPLOYEE_STATES = frozenset({
 REPORT_STATES = frozenset({"heartbeat", "completed", "blocked", "failed", "question"})
 QC_STATES = frozenset({"pass", "repair_required", "fail", "pass_with_exception"})
 QC_SEVERITIES = frozenset({"info", "minor", "major", "critical"})
-QC_DECISIONS = frozenset({"fire", "accept_exception", "request_user"})
+QC_DECISIONS = frozenset({"fire", "accept_exception", "continue_repair", "request_user"})
+QC_OWNER_CHOICES = {"accept_exception": "接受指定例外", "continue_repair": "继续返修复检", "fire": "淘汰员工子树"}
 GATE_STATES = frozenset({
     "CONTINUE", "ACCEPT", "EARLY_TOO_EASY", "INFRA_FAILURE",
     "EVIDENCE_INCOMPLETE", "FINAL_POLICY_REVIEW", "FINAL_POLICY_FAIL",
@@ -355,6 +356,150 @@ def _owner_form_employee_id(root: Path, form_id: str) -> str | None:
     return None
 
 
+def _unresolved_qc_failure(employee: dict, *, second_round_only: bool = False) -> bool:
+    qc = employee.get("last_qc_decision") or {}
+    if employee.get("role") != "producer" or qc.get("decision") not in {"fail", "repair_required", "pass_with_exception"}:
+        return False
+    if second_round_only and (not isinstance(qc.get("round"), int) or qc["round"] < 2):
+        return False
+    resolution = employee.get("owner_qc_resolution") or {}
+    return not (qc.get("decision_sha256") and resolution.get("qc_decision_sha256") == qc["decision_sha256"]
+                and resolution.get("decision") in {"fire", "accept_exception", "continue_repair"})
+
+
+def _qc_owner_review(root: Path, employee: dict) -> dict | None:
+    """Evidence-linked owner brief, never convert missing proof into a failure."""
+    if not _unresolved_qc_failure(employee, second_round_only=True):
+        return None
+    qc = employee["last_qc_decision"]
+    brief = {
+        "producer_id": employee["employee_id"], "round": qc["round"],
+        "decision": qc["decision"], "severity": qc.get("severity"), "summary": qc.get("note"),
+        "report_path": qc.get("report_path"), "report_sha256": qc.get("report_sha256"),
+        "qc_decision_sha256": qc.get("decision_sha256"), "report_integrity": "unavailable",
+        "findings": [], "resolved_items": [], "quality_checks": {},
+        "allowed_owner_decisions": ["accept_exception", "continue_repair", "fire"],
+        "automatic_fire_allowed": False,
+        "notice": "QC-2 后仍未通过，保留员工及证据等待负责人。接受例外不改变原始 QC/成绩，不自动冻结或试跑。",
+    }
+    try:
+        source = _regular_file(qc.get("report_path"), "QC report")
+        if not source.is_relative_to(root):
+            return brief
+        if common.sha256_file(source) != qc.get("report_sha256"):
+            return {**brief, "report_integrity": "changed"}
+        report = common.load_json(source)
+    except (common.PipelineError, OSError, ValueError, TypeError):
+        return brief
+    brief["report_integrity"] = "verified"
+    checks = report.get("q1_q7") or report.get("quality_checks")
+    if isinstance(checks, dict):
+        brief["quality_checks"] = {key: value for key, value in checks.items()
+                                   if key in {f"Q{n}" for n in range(1, 8)} and isinstance(value, str)}
+    closed = report.get("repair_closed") or report.get("resolved_findings") or []
+    if isinstance(closed, list):
+        brief["resolved_items"] = [item[:2000] for item in closed if isinstance(item, str)][:100]
+    findings = report.get("findings") or report.get("remaining_findings") or report.get("remaining_blockers") or []
+    if isinstance(findings, list):
+        for item in findings[:100]:
+            if isinstance(item, str):
+                brief["findings"].append({"title": item[:2000], "status": "not-classified", "severity": qc.get("severity")})
+            elif isinstance(item, dict):
+                brief["findings"].append({key: item[key] for key in (
+                    "id", "title", "summary", "status", "severity", "requirement", "evidence", "evidence_path",
+                    "expected", "observed", "repair", "recommendation", "impact", "waivable"
+                ) if key in item})
+    return brief
+
+
+def qc_reply_scopes(root: Path, consumer: dict) -> list[dict]:
+    """Bind an answered native question to the QC subject it actually asked."""
+    result = []
+    for index, question in enumerate(consumer.get("questions", [])):
+        text = question.get("question", "") if isinstance(question, dict) else ""
+        if not isinstance(text, str):
+            continue
+        for employee in _employees(root):
+            qc = employee.get("last_qc_decision") or {}
+            digest = qc.get("decision_sha256")
+            if (_unresolved_qc_failure(employee) and digest and employee["employee_id"] in text and digest in text):
+                result.append({"producer_id": employee["employee_id"], "qc_decision_sha256": digest,
+                               "qc_report_sha256": qc.get("report_sha256"), "answer_key": f"q{index}"})
+    return result
+
+
+def _qc_owner_authorization(root: Path, producer: dict, decision: str, evidence: Path | None) -> dict:
+    if evidence is None or not evidence.is_relative_to(root / "supervision/native-interactions"):
+        raise common.PipelineError("QC 例外、追加返修或淘汰必须附上负责人真实 question 回答回执；只有上司说明不能代替负责人决定。")
+    receipt = common.load_json(evidence)
+    digest = receipt.get("reply_sha256")
+    if not digest or common.canonical_sha256({k: v for k, v in receipt.items() if k != "reply_sha256"}) != digest:
+        raise common.PipelineError("负责人回答回执身份不一致。")
+    manifest = common.load_json(root / "supervision/manifest.json")
+    if receipt.get("status") != "answered" or receipt.get("session_id") != manifest.get("supervisor_session_id"):
+        raise common.PipelineError("回答不属于绑定的实际监督会话。")
+    qc = producer.get("last_qc_decision") or {}
+    for scope in receipt.get("qc_owner_scopes", []):
+        if (scope.get("producer_id") == producer["employee_id"]
+                and scope.get("qc_decision_sha256") == qc.get("decision_sha256")
+                and scope.get("qc_report_sha256") == qc.get("report_sha256")
+                and receipt.get("answer", {}).get(scope.get("answer_key")) in {decision, QC_OWNER_CHOICES[decision]}):
+            return {"form_id": receipt.get("form_id"), "reply_sha256": digest,
+                    "session_id": receipt["session_id"], "answer_key": scope["answer_key"]}
+    raise common.PipelineError("负责人回答没有授权此员工、当前 QC 凭证和这一操作；不能把其他问题的回答套用过来。")
+
+
+@mutation
+def record_qc_owner_answer(workspace: str | Path, producer_id: str, decision: str) -> tuple[dict, int]:
+    """Import a real completed question-tool answer from TUI/native chat."""
+    root, campaign = _root(workspace)
+    manifest = _load_manifest(root, campaign)
+    producer = _employee(root, producer_id)
+    if decision not in QC_OWNER_CHOICES or not _unresolved_qc_failure(producer):
+        raise common.PipelineError("先定位待负责人决定的具体 QC 及操作。")
+    session_id = manifest.get("supervisor_session_id")
+    directory = manifest.get("supervisor_session_directory")
+    if not session_id or not directory:
+        raise common.PipelineError("先绑定实际上司会话。")
+    topify_opencode._visible_session(directory, session_id)
+    messages = topify_opencode._get(f"/api/session/{session_id}/message?limit=5&order=desc&type=assistant").get("data", [])
+    for message in messages:
+        for tool in message.get("content", []):
+            state = tool.get("state", {})
+            if tool.get("type") != "tool" or tool.get("name") != "question" or state.get("status") != "completed":
+                continue
+            questions = state.get("input", {}).get("questions", [])
+            consumer = {"message_id": message.get("id"), "tool_id": tool.get("id"),
+                        "agent": message.get("agent"), "questions": questions, "status": "completed"}
+            scopes = qc_reply_scopes(root, consumer)
+            output = "\n".join(part.get("text", "") for part in state.get("content", []) if isinstance(part, dict))
+            for scope in scopes:
+                if scope["producer_id"] != producer_id:
+                    continue
+                index = int(scope["answer_key"][1:])
+                question = questions[index]["question"]
+                label = QC_OWNER_CHOICES[decision]
+                if ("User has answered your questions:" not in output or f'"{question}"="{label}"' not in output):
+                    continue
+                receipt = {
+                    "schema_version": 1, "source": "opencode-question-tool-result", "form_id": None,
+                    "session_id": session_id, "consumer": consumer, "status": "answered",
+                    "answer": {scope["answer_key"]: label}, "qc_owner_scopes": [scope],
+                    "tool_output_sha256": common.canonical_sha256(output),
+                    "execution_status": "awaiting-agent-action", "recorded_at": common.utc_now(),
+                }
+                receipt["reply_sha256"] = common.canonical_sha256(receipt)
+                directory = root / "supervision/native-interactions" / ("tool-" + common.canonical_sha256(consumer)[:32])
+                number, attempt = common.next_attempt(directory)
+                path = attempt / "reply.json"
+                common.write_new_json(path, receipt)
+                _append(root, "qc_owner_answer_recorded", producer_id=producer_id, decision=decision,
+                        reply_sha256=receipt["reply_sha256"], message_id=consumer["message_id"],
+                        qc_decision_sha256=scope["qc_decision_sha256"])
+                return {"status": "recorded", "evidence_path": str(path), **receipt}, 0
+    raise common.PipelineError("未找到实际 question 工具对当前 QC 凭证和该选项的完成回答；不能用聊天猜测或上司自己的说明批准。")
+
+
 @mutation
 def send_supervisor_message(workspace: str | Path, text: str) -> tuple[dict, int]:
     """Admit owner input to the bound *real* session; never claim execution."""
@@ -377,6 +522,10 @@ def send_supervisor_message(workspace: str | Path, text: str) -> tuple[dict, int
         "Explain the specific finding, affected task and the action each choice permits. "
         "Acceptance/approval does not require an owner reason; do not add a mandatory explanation field. "
         "After a native answer, execute only its scoped lawful next step, retain action receipts, "
+        "QC-1 failure requires repair; after repaired QC-2 any remaining failure/incomplete finding must go to the owner. "
+        "Do not automatically fire or silently relax the rubric; present exact findings, closed repairs, evidence, "
+        "severity and impact. Distinguish failed checks from unmeasured/incomplete evidence and extra reviewer demands. "
+        "Let the owner accept a scoped exception without a reason, authorize further repair, or explicitly terminate. "
         "and report what actually ran. Seed/helper/QC-1 routine handling is your responsibility. "
         "Do not treat this ordinary message as a response to another native question or waive technical gates.\n\n"
         + text
@@ -698,6 +847,8 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
             "legacy_owner_form": employee.get("owner_form"),
             "report": _report_summary(root, employee),
             "qc": employee.get("last_qc_decision"),
+            "qc_owner_review": _qc_owner_review(root, employee),
+            "owner_qc_resolution": employee.get("owner_qc_resolution"),
             "rollout_gate": gate,
             "child_count": len(children),
             "children": [
@@ -718,6 +869,7 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
                 "status": employee["employment_status"],
                 "responsible": "supervisor",
                 "report": row["report"],
+                "owner_review": row["qc_owner_review"],
             })
         if gate is not None and gate.get("status") not in {"CONTINUE", "ACCEPT"}:
             alerts.append({
@@ -759,6 +911,16 @@ def fire(workspace: str | Path, employee_id: str, reason: str, evidence: str | P
         raise common.PipelineError("employee is already fired")
     if not _text(reason):
         raise common.PipelineError("termination reason must be nonempty")
+    qc = value.get("last_qc_decision") or {}
+    if value.get("role") == "producer" and qc.get("decision") in {"fail", "repair_required", "pass_with_exception"}:
+        resolution = value.get("owner_qc_resolution") or {}
+        bound = bool(qc.get("decision_sha256") and resolution.get("qc_decision_sha256") == qc["decision_sha256"])
+        allowed = bound and (resolution.get("decision") == "fire" or (
+            resolution.get("decision") == "accept_exception" and
+            value.get("last_rollout_gate", {}).get("status") == "EARLY_TOO_EASY"
+        ))
+        if not allowed:
+            raise common.PipelineError("QC 未通过不是自动淘汰条件。QC-1 先返修；QC-2 仍未通过必须交负责人，先记录负责人明确淘汰决定。")
     evidence_path = _regular_file(evidence, "termination evidence") if evidence else None
     evidence_sha256 = common.sha256_file(evidence_path) if evidence_path else None
     fired = []
@@ -1054,6 +1216,9 @@ def report(workspace: str | Path, employee_id: str, report_file: str | Path) -> 
             "question": "needs-owner-decision",
             "failed": "needs-owner-decision",
         }[status_value]
+    if _unresolved_qc_failure(employee, second_round_only=True):
+        # A heartbeat or another r2 completion is not the owner's decision.
+        state = "needs-owner-decision"
     _save_employee(root, {
         **employee,
         "employment_status": state,
@@ -1251,8 +1416,18 @@ def qc_decision(
         raise common.PipelineError("QC employee must be independent from the producer tree")
     if producer.get("hardening_revision") != 2:
         raise common.PipelineError("producer must complete mandatory r0->r1->r2 hardening before QC")
-    if type(round_number) is not int or round_number not in {1, 2}:
-        raise common.PipelineError("QC round must be 1 or 2")
+    if type(round_number) is not int or round_number < 1:
+        raise common.PipelineError("QC round must be a positive integer")
+    previous = producer.get("last_qc_decision") or {}
+    previous_round = previous.get("round", 0)
+    if round_number != previous_round + 1:
+        raise common.PipelineError("QC 轮次必须连续；不能重置轮次或覆盖 QC-2 失败来绕过负责人。")
+    if round_number > 2:
+        authorization = producer.get("owner_qc_resolution") or {}
+        if not (authorization.get("decision") == "continue_repair"
+                and authorization.get("next_qc_round") == round_number
+                and authorization.get("qc_decision_sha256") == previous.get("decision_sha256")):
+            raise common.PipelineError("超过默认两轮 QC 必须由负责人明确批准追加返修/复检。")
     if decision not in QC_STATES or severity not in QC_SEVERITIES:
         raise common.PipelineError("invalid QC decision or severity")
     if not _text(note):
@@ -1283,10 +1458,14 @@ def qc_decision(
         next_state = "repair-required"
     else:
         next_state = "needs-owner-decision"
-    _save_employee(root, {**producer, "employment_status": next_state, "last_qc_decision": receipt})
+    _save_employee(root, {**producer, "employment_status": next_state, "last_qc_decision": receipt,
+                          "owner_review_required": round_number >= 2 and decision != "pass"})
     _append(root, "qc_decision_recorded", producer_id=producer_id, qc_employee_id=qc_id,
             round=round_number, decision=decision, severity=severity,
-            next_state=next_state, decision_sha256=receipt["decision_sha256"])
+             next_state=next_state, decision_sha256=receipt["decision_sha256"])
+    if round_number >= 2 and decision != "pass":
+        _append(root, "qc_owner_review_required", employee_id=producer_id, round=round_number,
+                qc_decision_sha256=receipt["decision_sha256"], automatic_fire_allowed=False)
     return {**receipt, "next_employee_state": next_state}, 0
 
 
@@ -1295,24 +1474,41 @@ def qc_resolve(
     workspace: str | Path,
     producer_id: str,
     decision: str,
-    note: str,
+    note: str = "",
     evidence: str | Path | None = None,
 ) -> tuple[dict, int]:
     root, campaign = _root(workspace)
     _load_manifest(root, campaign)
     if decision not in QC_DECISIONS:
         raise common.PipelineError(f"decision must be one of {sorted(QC_DECISIONS)}")
-    if not _text(note):
-        raise common.PipelineError("QC resolution needs a note")
+    if decision in {"fire", "request_user"} and not _text(note):
+        raise common.PipelineError("淘汰或上报审核需要具体问题说明；接受例外和继续返修可以不填原因。")
+    note = note.strip() if isinstance(note, str) else ""
     producer = _employee(root, producer_id)
-    if producer.get("employment_status") != "needs-owner-decision":
+    if producer.get("employment_status") != "needs-owner-decision" and not (
+        decision == "fire" and producer.get("employment_status") in {"repair-required", "rollout-pending", "rollout-authorized"}
+    ):
         raise common.PipelineError("producer is not waiting for an owner QC decision")
+    qc = producer.get("last_qc_decision") or {}
+    if producer.get("role") != "producer" or not qc or qc.get("decision") == "pass":
+        raise common.PipelineError("QC resolution needs a specific unresolved independent QC finding")
     evidence_path = _regular_file(evidence, "QC resolution evidence") if evidence else None
+    owner_authorization = _qc_owner_authorization(root, producer, decision, evidence_path) if decision != "request_user" else None
+    if decision == "accept_exception":
+        report = _regular_file(qc.get("report_path"), "current QC report")
+        if common.sha256_file(report) != qc.get("report_sha256"):
+            raise common.PipelineError("QC 报告已变更；不能把旧例外批准套用到新证据。")
     resolution = {
         "schema_version": 1,
         "producer_id": producer_id,
         "decision": decision,
         "note": note,
+        "authority": "supervisor-escalation" if decision == "request_user" else "owner",
+        "owner_authorization": owner_authorization,
+        "qc_decision_sha256": qc.get("decision_sha256"),
+        "qc_round": qc.get("round"),
+        "qc_report_sha256": qc.get("report_sha256"),
+        "next_qc_round": qc.get("round", 0) + 1 if decision == "continue_repair" else None,
         "evidence_path": str(evidence_path) if evidence_path else None,
         "evidence_sha256": common.sha256_file(evidence_path) if evidence_path else None,
         "recorded_at": common.utc_now(),
@@ -1322,9 +1518,15 @@ def qc_resolve(
     resolution["attempt"] = number
     common.write_new_json(attempt / "owner-qc-resolution.json", resolution)
     if decision == "fire":
+        _save_employee(root, {**producer, "owner_qc_resolution": resolution, "owner_review_required": False})
         value, _ = fire(root, producer_id, f"owner QC resolution: {note}", evidence_path)
     elif decision == "accept_exception":
-        value = {**producer, "employment_status": "rollout-pending", "qc_exception": resolution}
+        value = {**producer, "employment_status": "rollout-pending", "qc_exception": resolution,
+                 "owner_qc_resolution": resolution, "owner_review_required": False}
+        _save_employee(root, value)
+    elif decision == "continue_repair":
+        value = {**producer, "employment_status": "repair-required", "owner_qc_resolution": resolution,
+                 "owner_review_required": False}
         _save_employee(root, value)
     else:
         value = {**producer, "employment_status": "needs-owner-decision", "qc_escalation": resolution}
@@ -1352,6 +1554,9 @@ def owner_decision(
     if not note:
         note = "Owner approved without additional note."
     employee = _employee(root, employee_id)
+    qc_failure = employee.get("role") == "producer" and (employee.get("last_qc_decision") or {}).get("decision") in {"fail", "repair_required", "pass_with_exception"}
+    if qc_failure and decision in {"accept_exception", "fire"}:
+        return qc_resolve(root, employee_id, decision, note, evidence)
     evidence_path = _regular_file(evidence, "owner decision evidence") if evidence else None
     allowed = {
         "approve_rollout": {"rollout-pending"},
@@ -1421,6 +1626,22 @@ def create_owner_form(workspace: str | Path, employee_id: str, note: str = "") -
         "询问必须说明证据、选项后果和下一项实际操作。没有当前冻结和全部技术凭证不得放行试跑。"
         "本次请求本身不批准 rollout、不接受 QC 例外、不淘汰员工。\n" + note
     )
+    owner_review = _qc_owner_review(root, employee)
+    if owner_review:
+        preview = {key: owner_review.get(key) for key in (
+            "round", "decision", "severity", "summary", "report_path", "report_sha256",
+            "qc_decision_sha256", "report_integrity", "quality_checks", "notice"
+        )}
+        text += (
+            "\n这不是常规阶段收尾：返修后的 QC-2 仍未通过，必须由负责人审核，不可自动 fired。"
+            "读取下面身份绑定的完整 QC 报告，展示关闭项、剩余失败/缺证据项及具体依据和影响，"
+            "用原生 question 工具等待负责人选择接受指定例外（原因可空）、追加返修/复检或明确淘汰。"
+            "该 question 原文必须包含 producer_id 和完整 qc_decision_sha256，选项标签使用"
+            "「接受指定例外」「继续返修复检」「淘汰员工子树」。Web 将保存绑定该 QC 凭证的回答回执。"
+            "你随后以该 supervision/native-interactions 下的 reply.json 作为 qc-resolve --evidence，"
+            "不得只用自己的说明声明 owner 已批准。"
+            "未答复前保留员工/证据，不默认接受或放行试跑。\n" + json.dumps(preview, ensure_ascii=False)
+        )
     return send_supervisor_message(root, text)
 
 

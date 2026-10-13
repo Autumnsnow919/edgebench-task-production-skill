@@ -21,8 +21,17 @@ The production Skill supports native OpenCode Task dispatch and headless Orca
 CLI dispatch. The top Agent is a supervisor, not a task author. It hires one
 producer employee per task; that producer owns the complete Seed-to-pre-rollout
 workflow and may request child Tasks through the supervisor. An independent QC
-employee performs QC-1 and, after a repair, QC-2. The top Agent approves or
-escalates decisions, and the owner is consulted for serious QC-2 exceptions.
+employee performs QC-1 and, after a repair, QC-2. QC-1 failure requests repair.
+If repaired QC-2 is still not passing, retain the producer and its evidence and
+require the owner's review, regardless of severity; never automatically fire
+it for failing two QC rounds. The supervisor presents the exact unmet items,
+closed repairs, requirement/evidence, severity and impact, distinguishing actual
+failures from incomplete verification or extra reviewer expectations. The owner
+may accept a scoped exception without a reason, authorize another repair/review,
+or explicitly terminate. A waiver is not a measured pass or rollout permission.
+Bind that owner choice to the current QC ID/hash using the native-question
+receipt and `qc-resolve --evidence`; a supervisor's own note cannot approve it.
+Read `references/supervisor-protocol.md` for the Web/TUI answer receipt mapping.
 
 Initialize the transport-neutral ledger with:
 
@@ -190,8 +199,13 @@ Work/Judge remain offline and must pass executed isolation checks.
 **ARM64 performs applicable task checks except frontier rollout and main-agent
 Q1–Q7 review:** image/context builds, NOP/reference or open-solution calibration,
 same-snapshot repeats, scoring parity and reproducibility. Use the owner-managed
-real arm64 host and its privately configured SForge binary path; never put
-internal hostnames, access paths or credentials in a customer artifact.
+real arm64 host: **owner-authorized internal SSH target `root@10.2.39.3`**
+(confirmed 2026-10-13). Connect with `ssh root@10.2.39.3`; use that host's
+privately configured SForge binary path and an exclusive validation workspace.
+Verify actual `aarch64`/`arm64` execution and retain task/image-bound build,
+scoring, repeat and cross-architecture receipts. SSH access alone is not an
+ARM64 pass. This endpoint belongs only in internal Skill/owner operations; never
+copy it, credentials or host paths into customer tasks, README/QC or archives.
 Historical QEMU receipts keep their actual execution mode; they do not become
 new native measurements. Never write credentials into assets or commands.
 

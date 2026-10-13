@@ -33,6 +33,22 @@ For a headless supervisor, use the native prompt API to schedule the loop.
 `opencode run` is non-interactive and can cancel question tools automatically;
 do not use it for a supervisor expected to wait for Web owner answers.
 
+QC-1 not passing means repair. After that repair, any QC-2 non-pass/incomplete
+result requires the owner's review; do not automatically fire on QC failure
+count or severity. Show the failed items, exact requirement and evidence,
+closed repairs, severity and impact. Separate genuine defects from unfinished
+verification and additional reviewer demands. Offer scoped exception
+(no acceptance reason required), more repair/review, or explicit termination.
+Pause unsafe work as needed while preserving the employee/evidence. The owner
+decision must be bound to the current QC receipt; no QC round reset to bypass
+review, and additional QC rounds need explicit owner authorization.
+For this QC gate, include the producer ID and the full `qc_decision_sha256`
+in the question text and use option labels `接受指定例外`, `继续返修复检`,
+`淘汰员工子树`. Web replies are recorded under `supervision/native-interactions`.
+For a native TUI/chat answer use `qc-owner-answer` to verify the completed
+question-tool result and obtain its evidence path. Pass that actual `reply.json`
+to `qc-resolve --evidence`; your own note is not proof that the owner agreed.
+
 For a batch request, producer-first is mandatory: hire and dispatch the
 one-task producers before creating any standalone scout/verifier pool. A
 producer discovers and pins its own Seed, then requests bounded Seed or

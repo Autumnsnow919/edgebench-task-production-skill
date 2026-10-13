@@ -91,6 +91,14 @@ The supervisor owns dispatch, repair and termination. The legacy Web generic
 `owner-decision` path is disabled; an unrelated child completion cannot be
 approved as a rollout.
 
+Repaired QC-2 non-pass findings require owner review, not automatic firing.
+The board/inspector shows the report hash, closed repairs, remaining findings,
+severity and original pass/fail/incomplete states. Unclassified prose is marked
+unclassified instead of inferred as failed. The supervisor asks the real native
+question with the current QC subject hash. Its verified owner reply is retained
+as scoped evidence; `qc-resolve` requires that evidence for exception, further
+repair or termination. Supervisor tokens cannot make these owner decisions.
+
 Only a form backed by a running native `question` tool is answerable. On reply
 the server verifies its source assistant message/tool ID. The answer resumes
 that waiting tool, not a generic JSON-state mapper. The UI keeps selections

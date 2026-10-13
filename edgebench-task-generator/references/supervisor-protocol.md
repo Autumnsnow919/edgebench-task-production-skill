@@ -184,10 +184,40 @@ QC checks the executable task, NOP/reference behavior, error handling, score
 ladder, snapshot identity, isolation, reproducibility and the selected
 Benchmark requirements. A QC failure is not a model-rollout failure.
 
-If QC-2 still finds a problem, the supervisor records severity and asks the
-owner when the issue is not an automatic termination. The supervisor may record
-an explicit exception or fire the producer; it must never silently send an
-unverified repair to rollout.
+QC-1 non-pass requires repair. If repaired QC-2 still has an unmet item,
+retain the employee and its tree and require the owner's review regardless of
+severity. Two failed QC rounds are **not automatic termination**. Present the
+exact failed/incomplete checks, requirements, evidence and impact; show which
+first-round findings the repair closed. Reviewer recommendations outside the
+agreed rubric must be identified as recommendations, not silently added gates.
+The owner chooses scoped exception (reason optional), more repair/review, or
+explicit termination. `qc-resolve` binds this choice to the current QC decision
+and report hashes. Generic `employee-fire` refuses unresolved QC failures.
+Default automatic QC is capped at two rounds; `continue_repair` authorizes only
+the next numbered review. No resetting to QC-1 or relabeling a third review as
+QC-2. Further non-pass results return to the owner. Preserve original findings
+and scores; accepting an exception does not start rollout, change a Judge
+result, or claim missing ARM/build/privacy evidence passed.
+
+QC owner decisions require an actual native question answer, not a supervisor
+note asserting approval. In the question text include the producer ID and the
+full current `qc_decision_sha256`; use option labels `接受指定例外`,
+`继续返修复检`, `淘汰员工子树`. This binds the answer to the affected subject,
+not a generic “accept everything”. Web stores the verified tool reply under
+`supervision/native-interactions/.../reply.json` with its scoped QC identity.
+For a TUI/native chat answer, `qc-owner-answer` inspects the real completed
+question tool in the bound session; an error/cancelled question is not an answer.
+Then `qc-resolve --evidence <reply.json>` validates the subject and chosen
+operation. An unrelated task's answer, a different choice or a changed QC
+report cannot be reused. Acceptance and continued-repair notes are optional.
+
+```bash
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  qc-owner-answer CAMPAIGN --producer-id producer-001 --decision continue_repair
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  qc-resolve CAMPAIGN --producer-id producer-001 --decision continue_repair \
+  --evidence ACTUAL_NATIVE_REPLY_JSON
+```
 
 ```bash
 python3 edgebench-task-generator/scripts/topify_pipeline.py \

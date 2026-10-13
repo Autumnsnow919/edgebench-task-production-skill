@@ -185,6 +185,7 @@ class SupervisorContext:
             "schema_version": 1, "form_id": result["form_id"], "session_id": result["session_id"],
             "consumer": result["consumer"], "answer": answer, "status": "answered",
             "execution_status": "awaiting-agent-action", "recorded_at": common.utc_now(),
+            "qc_owner_scopes": topify_supervisor.qc_reply_scopes(self.root, result["consumer"]),
         }
         receipt["reply_sha256"] = common.canonical_sha256(receipt)
         common.write_new_json(attempt / "reply.json", receipt)
@@ -657,13 +658,13 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/qc-resolve":
                 body = self._body()
-                auth = self._require("owner" if body.get("decision") == "accept_exception" else None,
+                auth = self._require("owner" if body.get("decision") != "request_user" else None,
                                      body.get("supervisor_id"))
                 context = self._context(auth, body.get("supervisor_id"))
                 evidence = self._inside_campaign(body.get("evidence"), "evidence", context)
                 result, code = topify_supervisor.qc_resolve(
                     context.root, body["producer_id"], body["decision"],
-                    body["note"], evidence,
+                    body.get("note", ""), evidence,
                 )
                 self._respond(200 if code == 0 else 409, {"role": auth[0], **result})
                 return

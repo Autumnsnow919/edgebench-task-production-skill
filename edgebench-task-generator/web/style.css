@@ -46,6 +46,8 @@ button { cursor: pointer; }
 .supervisor-panel, .native-questions-panel { margin-bottom: 24px; }
 .supervisor-panel .scope-note, .supervisor-panel .form-hint { overflow-wrap: anywhere; }
 .supervisor-panel.warning { border-color: #d79763; }
+.qc-owner-review { border: 1px solid #d79763; border-radius: 9px; padding: 12px; margin-top: 12px; overflow-wrap: anywhere; }
+.qc-owner-review li { margin-bottom: 10px; }
 .native-question { border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
 .question-field { border: 0; padding: 12px 0; min-width: 0; }
 .question-choice { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; }

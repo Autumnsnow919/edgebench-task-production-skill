@@ -424,7 +424,8 @@ def question_consumer(session_id: str, form: dict) -> dict:
         if (part.get("type") == "tool" and part.get("id") == tool["id"]
                 and part.get("name") == "question" and part.get("state", {}).get("status") == "running"):
             return {"message_id": message_id, "tool_id": tool["id"], "status": "waiting",
-                    "agent": message.get("agent")}
+                    "agent": message.get("agent"),
+                    "questions": part.get("state", {}).get("input", {}).get("questions", [])}
     raise FormSettledError("上司已不在该 question 工具中等待；请刷新，不能把旧表单当作有效批准。")
 
 
