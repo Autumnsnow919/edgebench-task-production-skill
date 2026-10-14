@@ -93,7 +93,9 @@ model-hour re-runs, not faster creation of an unqualified JSON fixture.
    Include an append-only `evidence/pre-rollout-contract-review.json` in the
    current `task-review` evidence paths; this supplemental matrix is a
    reviewer finding, **not** an automatically passed CLI gate. `task-review`
-    needs all seven reviewed Qs evidenced `pass` before `ready`. `rollout-check`
+    may record non-blocking Q findings as `accepted` under the training-first
+    owner policy; `ready` rejects only `fail`/`pending` findings and still
+    requires evidence for every accepted exception. `rollout-check`
    already reads this review, and `rollout-collect` now rejects full-budget
    classification if the review is absent or its timestamp is after a run's
    `started_at`. A later inspection can diagnose a finished run but cannot

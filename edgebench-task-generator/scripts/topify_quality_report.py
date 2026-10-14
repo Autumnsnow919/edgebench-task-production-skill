@@ -66,7 +66,7 @@ def _score_interval(review: dict) -> tuple[float, float, int, int, int]:
     for index, key in enumerate(topify_review.QUALITY_IDS):
         item = quality.get(key)
         state = item.get("status") if isinstance(item, dict) else None
-        if state == "pass":
+        if state in {"pass", "accepted"}:
             passed += 1
             lower += WEIGHTS[index]
             upper += WEIGHTS[index]
@@ -83,6 +83,8 @@ def _score_interval(review: dict) -> tuple[float, float, int, int, int]:
 def _criterion_interval(state: object, weight: int) -> tuple[str, str]:
     if state == "pass":
         return "100/100", f"{weight:.1f}/{weight}"
+    if state == "accepted":
+        return "accepted", f"{weight:.1f}/{weight}"
     if state == "fail":
         return "0–90/100 (severity ungraded)", f"0.0–{weight * .9:.1f}/{weight}"
     return "0–100/100 (pending)", f"0.0–{weight:.1f}/{weight}"

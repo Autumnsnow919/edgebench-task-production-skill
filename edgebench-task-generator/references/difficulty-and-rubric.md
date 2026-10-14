@@ -21,10 +21,15 @@ isolation is assessed separately, not scored as Q8:
 | Q6 | Semantically equivalent lawful outputs are accepted; tolerances and restrictions are justified. |
 | Q7 | Repeated scores, timeout, error and skipped checks are interpreted correctly. |
 
-Record each item as `pass`, `fail` or `pending`, with a concrete finding and
-workspace-relative evidence file. `ready` requires all seven confirmed `pass`;
-missing evidence is `pending`. This authoring rule does not turn the quality
-rubric into the judge score or assert that SForge itself defines a rubric.
+Record each item as `pass`, `accepted`, `fail` or `pending`, with a concrete
+finding and workspace-relative evidence file. Under the owner-approved
+training-first policy, `accepted` records a non-blocking rubric/format/polish
+weakness whose impact on the training target is explicitly explained.
+`ready` rejects `fail` and `pending`, but may contain `accepted`; it does not
+require mechanical perfection of every rubric detail. A semantic truth,
+solvability, answer or scorer defect remains `fail`. This authoring rule does
+not turn the quality rubric into the judge score or assert that SForge itself
+defines a rubric.
 For bounded positive/negative SForge probes, independent formula checks and
 **actual Work/Judge** network/user observations, read
 `qemu-and-independent-review.md` before signing Q1–Q7. In particular, an

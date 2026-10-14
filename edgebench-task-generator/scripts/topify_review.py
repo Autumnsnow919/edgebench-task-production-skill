@@ -123,8 +123,8 @@ def review_task(workspace: str | Path, input_path: str | Path) -> tuple[dict, in
         item = quality[key]
         if not isinstance(item, dict) or set(item) != {"status", "finding", "evidence"}:
             raise common.PipelineError(f"{key} must contain status, finding, evidence")
-        if item["status"] not in {"pass", "fail", "pending"} or not _text(item["finding"]):
-            raise common.PipelineError(f"{key} needs a finding and pass/fail/pending status")
+        if item["status"] not in {"pass", "accepted", "fail", "pending"} or not _text(item["finding"]):
+            raise common.PipelineError(f"{key} needs a finding and pass/accepted/fail/pending status")
         quality_evidence[key] = _checked_evidence(root, item["evidence"])
     difficulty = source["difficulty"]
     if not isinstance(difficulty, dict) or set(difficulty) != {
@@ -140,8 +140,8 @@ def review_task(workspace: str | Path, input_path: str | Path) -> tuple[dict, in
         raise common.PipelineError("difficulty review must explain each required mechanism and probe")
     difficulty_evidence = _checked_evidence(root, difficulty["evidence"])
     ready = source["decision"] == "ready"
-    if ready and any(quality[key]["status"] != "pass" for key in QUALITY_IDS):
-        raise common.PipelineError("rollout-ready review needs all Q1–Q7 confirmed pass")
+    if ready and any(quality[key]["status"] in {"fail", "pending"} for key in QUALITY_IDS):
+        raise common.PipelineError("training-first ready review cannot contain fail or pending quality items")
     if ready:
         _current_probe(root, task_sha256)
     if ready and not any(
@@ -683,7 +683,7 @@ def review_is_current(root: Path, task_sha256: str) -> bool:
     quality = review.get("quality")
     if not isinstance(quality, dict) or not set(QUALITY_IDS).issubset(quality):
         return False
-    if not all(isinstance(quality[key], dict) and quality[key].get("status") == "pass" for key in QUALITY_IDS):
+    if not all(isinstance(quality[key], dict) and quality[key].get("status") in {"pass", "accepted"} for key in QUALITY_IDS):
         return False
     difficulty = review.get("difficulty")
     if (not isinstance(difficulty, dict)

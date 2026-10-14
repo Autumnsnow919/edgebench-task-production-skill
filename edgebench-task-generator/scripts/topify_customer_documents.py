@@ -51,7 +51,7 @@ def review_qc(tasks: list[dict]) -> bytes:
     for item in tasks:
         audit = item["audit"]
         quality = item["quality_status"]
-        passed = sum(status == "pass" for status in quality.values())
+        passed = sum(status in {"pass", "accepted"} for status in quality.values())
         technical = "已核验" if audit["status"] == "complete" else "缺少完整技术收据"
         lines.append(f"| {item['task_id']} | {len(item['rows'])} | {technical} | "
                      f"Q1–Q7：{passed}/{len(quality)} 项记录通过 |")

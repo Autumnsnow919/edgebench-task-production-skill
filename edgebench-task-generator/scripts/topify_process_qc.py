@@ -64,7 +64,7 @@ def report(workspace: str | Path, output: str | Path) -> tuple[dict, int]:
     records = topify_validate.task_records(task)
     safe_task = bool(records) and all(item["type"] in {"file", "directory"} for item in records)
     review_ready = review.get("status") == "ready" and all(
-        isinstance(quality.get(key), dict) and quality[key].get("status") == "pass"
+        isinstance(quality.get(key), dict) and quality[key].get("status") in {"pass", "accepted"}
         for key in topify_review.QUALITY_IDS
     )
     measured = common.load_json(root / "evidence/measurements/latest.json") if (root / "evidence/measurements/latest.json").is_file() else {}
