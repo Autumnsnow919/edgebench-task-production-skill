@@ -213,8 +213,7 @@
     $('detail-state').innerHTML = '<h3>正在读取实际状态</h3><p>点击已收到，正在读取该员工及其原生问题。没有创建新的审批或普通消息。</p>';
     $('detail-evidence').innerHTML = '<h3>证据</h3><p>读取中…</p>';
     $('detail-json').textContent = ''; $('detail-log').textContent = '';
-    $('dispatch-worker').hidden = false; $('fire-worker').hidden = false;
-    $('dispatch-worker').disabled = true; $('fire-worker').disabled = true;
+    $('start-worker').disabled = true; $('dispatch-worker').disabled = true; $('fire-worker').disabled = true;
     $('employee-chat-input').disabled = true; $('employee-chat-send').disabled = true;
     $('employee-chat-input').value = ''; $('detail-messages').textContent = '';
     $('employee-chat-status').textContent = '正在核验实际会话；未核验前不会发送消息。';
@@ -239,7 +238,10 @@
       $('detail-state').innerHTML = `<h3>当前状态</h3><p>${esc(action(employee))}</p><p>阶段：${esc(label(employee.phase))}<br>实际会话：${esc(employee.session_id || '未绑定')}<br>会话状态：${esc(label(employee.runtime?.status))}<br>心跳：${esc(label(employee.health?.status))}<br>上级：${esc(label(employee.parent_id))}<br>独占目录：${esc(employee.job_root)}</p>${employee.health?.attention ? `<p class="health-warning">${esc(employee.health.reason)}<br>最后报告：${esc(ago(employee.health.last_report_at))}</p>` : ''}${stageMarkup(employee)}`;
       $('detail-evidence').innerHTML = `<h3>当前证据</h3><p>质检：${esc(label(employee.qc?.decision))}<br>模型试跑：${esc(label(employee.rollout_gate?.status))}<br>最近报告：${esc(label(employee.report?.status))}</p>${qcReviewMarkup(employee.qc_owner_review)}`;
       $('detail-json').textContent = JSON.stringify(employee,null,2); $('detail-log').textContent = employee.report?.summary || '暂无员工报告。';
-      $('dispatch-worker').hidden = false; $('fire-worker').hidden = false;
+      $('start-worker').hidden = false; $('dispatch-worker').hidden = false; $('fire-worker').hidden = false;
+      const startable = Boolean(data?.communication_control?.worker_channel_open && data?.runtime_capabilities?.bound_session_resume && employee.session_id && !['fired','complete','needs-owner-decision'].includes(employee.status));
+      $('start-worker').disabled = !startable;
+      $('start-worker').title = startable ? '向此员工的已有绑定 session 提交真实 resume prompt；等待 heartbeat 后才算运行' : '需要开启上下级通道、实际 runner 能力和已绑定 session';
       $('dispatch-worker').disabled = !data?.supervisor_runtime?.can_chat || ['fired','complete'].includes(employee.status);
       $('fire-worker').disabled = !data?.supervisor_runtime?.can_chat;
       const canChat=employee.runtime?.can_chat && data?.communication_control?.worker_channel_open !== false;
@@ -273,7 +275,7 @@
     $('detail-state').innerHTML = `<h3>真实 OpenCode 会话</h3><p>状态：${esc(label(session.status))}<br>父会话：${esc(session.parent_id || '根会话')}<br>目录：${esc(session.directory)}</p>`;
     $('detail-evidence').innerHTML = `<h3>会话身份</h3><p>Agent：${esc(label(session.agent))}<br>执行结果：${esc(label(session.outcome))}</p>`;
     $('detail-json').textContent = JSON.stringify(session,null,2); $('detail-log').textContent = '消息正文与工具调用名称保留原文，见“对话”。';
-    $('dispatch-worker').hidden = true; $('fire-worker').hidden = true;
+    $('start-worker').hidden = true; $('dispatch-worker').hidden = true; $('fire-worker').hidden = true;
     $('employee-chat-input').disabled = false; $('employee-chat-send').disabled = false; $('employee-chat-input').value = '';
     $('detail-messages').textContent = ''; $('employee-chat-status').textContent = '已选中此会话。查看不会发消息；发送消息和回答原生问题是两种不同操作。';
     openTab('chat'); await Promise.all([refreshChat(), refreshQuestions(true)]);
@@ -450,6 +452,15 @@
   $('dispatch-worker').addEventListener('click',async()=>{
     if(selection?.kind!=='employee') return;
     await requestSupervisorReview(selection.id, $('dispatch-worker'));
+  });
+  $('start-worker').addEventListener('click',async()=>{
+    if(selection?.kind!=='employee' || !scope) return;
+    const button=$('start-worker');button.disabled=true;
+    try {
+      const value=await api('/api/start',{method:'POST',body:JSON.stringify({supervisor_id:scope,employee_id:selection.id,note:'owner requested Web resume'})});
+      $('employee-chat-status').textContent=`已提交真实恢复 ${value.inbox_id || value.status}；等待员工 heartbeat，暂不声称已运行。`;
+      await refresh(); await showEmployee(selection.id);
+    } catch(error) { $('employee-chat-status').textContent=error.message; button.disabled=false; }
   });
   $('fire-worker').addEventListener('click',openSupervisorChat);
   document.querySelectorAll('.view-switch').forEach(b=>b.addEventListener('click',()=>{view=b.dataset.view;document.querySelectorAll('.view-switch').forEach(x=>x.classList.toggle('active',x===b));renderEmployees();}));

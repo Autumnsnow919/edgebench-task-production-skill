@@ -87,7 +87,7 @@
       <div id="detail-questions" class="inspector-body hidden"><p id="detail-question-status" class="form-hint"></p><div id="detail-question-list"></div></div>
       <div id="detail-activity" class="inspector-body hidden"><pre id="detail-log" class="log-view"></pre></div>
       <div id="detail-evidence-tab" class="inspector-body hidden"><pre id="detail-json" class="json-view"></pre></div>
-      <div class="inspector-actions"><button id="dispatch-worker" class="action-button primary">请上司审查此员工</button><button id="fire-worker" class="action-button">联系上司</button></div>
+      <div class="inspector-actions"><button id="start-worker" class="action-button primary">启动/恢复实际会话</button><button id="dispatch-worker" class="action-button">请上司审查此员工</button><button id="fire-worker" class="action-button">联系上司</button></div>
     </aside>
   </div>
   <div id="command-modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><div><p class="overline">真实 OpenCode 会话</p><h2>联系本工作空间的上司</h2></div><button id="command-close" class="close-button" aria-label="关闭对话">×</button></div><p id="command-binding" class="modal-copy">消息会提交给已核验绑定的实际上司；发送会唤醒该会话。接收不等于执行，以下显示真实回复与工具调用。</p><div id="supervisor-messages" class="message-list modal-messages"></div><form id="command-form"><textarea id="command-input" placeholder="例如：汇报当前 QC 修复方案，不要启动模型试跑。"></textarea><div class="modal-actions"><span id="command-result" class="form-hint">发送后查看真实上司回复；不会偷偷替你回答原生问题。</span><button id="command-send" class="action-button primary" type="submit">发送给实际上司</button></div></form></div></div>
