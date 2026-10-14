@@ -31,6 +31,20 @@ def _binary() -> str | None:
     return shutil.which("opencode") or "/root/.opencode/bin/opencode"
 
 
+def runner_capabilities() -> dict:
+    binary = _binary()
+    return {
+        "opencode_cli": bool(binary),
+        "opencode_binary": binary,
+        "bound_session_resume": bool(binary),
+        "prompt_api": bool(binary),
+        "native_task_dispatch": "current-parent-session-only",
+        "process_launch": bool(binary),
+        "mcp_resource_listing_is_runner": False,
+        "reason": "已有绑定 session 使用 OpenCode prompt/resume；新 Task 由当前主会话 Native Task 或 Orca worker-start 启动。MCP 资源列表不是 runner。",
+    }
+
+
 def _get(path: str, timeout: int = 15) -> dict:
     binary = _binary()
     if not binary:

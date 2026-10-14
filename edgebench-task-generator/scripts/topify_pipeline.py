@@ -269,6 +269,14 @@ def parser() -> argparse.ArgumentParser:
     employee_bind.add_argument("--employee-id", required=True)
     employee_bind.add_argument("--session-id", required=True)
     employee_bind.add_argument("--dispatch-id")
+    start_employee = commands.add_parser("employee-start", help="resume one already-bound employee session through OpenCode prompt API")
+    start_employee.add_argument("workspace", type=Path)
+    start_employee.add_argument("--employee-id", required=True)
+    start_employee.add_argument("--note", default="")
+    start_employees = commands.add_parser("employees-start", help="resume several already-bound employee sessions")
+    start_employees.add_argument("workspace", type=Path)
+    start_employees.add_argument("--employee-id", action="append", dest="employee_ids", required=True)
+    start_employees.add_argument("--note", default="")
     seed_bind = commands.add_parser("producer-seed-bind", help="approve the producer-owned screened Seed and reserve its fingerprint")
     seed_bind.add_argument("workspace", type=Path)
     seed_bind.add_argument("--employee-id", required=True)
@@ -751,6 +759,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "employee-session-bind":
             report, code = topify_supervisor.bind_session(
                 args.workspace, args.employee_id, args.session_id, args.dispatch_id)
+        elif args.command == "employee-start":
+            report, code = topify_supervisor.start_employee(args.workspace, args.employee_id, args.note)
+        elif args.command == "employees-start":
+            report, code = topify_supervisor.start_employees(args.workspace, args.employee_ids, args.note)
         elif args.command == "producer-seed-bind":
             report, code = topify_supervisor.bind_seed(
                 args.workspace, args.employee_id, args.seed_id, args.screen_receipt)

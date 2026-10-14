@@ -129,6 +129,11 @@ prompt API for Web-interactive headless supervisors: non-interactive
 The dispatch button creates a signed dispatch receipt; it does not pretend that
 an OpenCode Task or Orca worker has started. The supervisor transport must
 start the actual worker and send a heartbeat before the card becomes `running`.
+The Web also exposes the runner capability separately from the communication
+gate. For an existing bound OpenCode employee, “start/resume” uses the native
+prompt API and waits for a heartbeat; it is not an MCP resource-list operation.
+If no Task/Orca/process runner is available, the UI reports `runner-unavailable`
+and leaves the ledger unchanged.
 
 The console never accepts arbitrary shell commands or PIDs. A termination is a
 ledger decision; the transport supervisor stops only exact processes/dispatches

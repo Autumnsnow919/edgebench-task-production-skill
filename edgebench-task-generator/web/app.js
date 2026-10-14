@@ -126,6 +126,10 @@
       ? `${supervisor.title || '已绑定上司'} · ${supervisor.session_id} · 实际 Agent：${label(supervisor.agent)}`
       : '本批次没有绑定真实上司会话。';
     $('supervisor-note').textContent = `${supervisor.reason || ''} 最近实际活动：${ago(supervisor.updated_at)}。查看不会唤醒；发送消息才会恢复该会话。`;
+    const runner=value.runtime_capabilities || {};
+    $('runner-capability').textContent = runner.prompt_api
+      ? `启动能力：可恢复既有绑定 session（prompt/resume）；${runner.process_launch ? 'CLI runner 可用。' : '进程 runner 不可用。'} MCP 资源列表不等于 runner。`
+      : '启动能力：不可用；沟通开启不代表可以启动员工。';
     const gate=value.communication_control || {worker_channel_open:true};
     if(gate.permissions_guarded) $('health').textContent='负责人接管（只读）';
     $('owner-control-status').textContent=gate.worker_channel_open ? '上下级自动沟通通道：开启' : '上下级自动沟通通道：已关闭；负责人消息和原生回答仍可用';

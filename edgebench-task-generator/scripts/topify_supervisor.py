@@ -758,6 +758,58 @@ def send_supervisor_message(workspace: str | Path, text: str) -> tuple[dict, int
     return {**receipt, "note": "已提交真实上司会话；请查看其回复与工具调用，接收不等于执行完成。"}, 0
 
 
+@mutation
+def start_employee(workspace: str | Path, employee_id: str, note: str = "") -> tuple[dict, int]:
+    """Resume one already-bound employee session through the real prompt API."""
+    root, campaign = _root(workspace)
+    _load_manifest(root, campaign)
+    control.require_worker_channel(root)
+    employee = _employee(root, employee_id)
+    if employee.get("transport") != "opencode-task" or not employee.get("session_id"):
+        raise common.PipelineError("该员工没有可恢复的已绑定 OpenCode session")
+    if employee.get("employment_status") in {"fired", "complete", "needs-owner-decision"}:
+        raise common.PipelineError("该员工当前状态不允许直接恢复；先处理负责人闸门或阶段决定。")
+    runtime = topify_opencode.employee_runtime(employee)
+    if runtime.get("status") == "running":
+        return {"status": "already-running", "employee_id": employee_id,
+                "session_id": employee["session_id"], "runtime": runtime}, 0
+    prompt = (
+        f"Resume the existing employee session for {employee_id}; do not create a new session.\n"
+        f"Campaign: {root}\nOwner-authorized continuation note: {note or 'continue the assigned stage'}\n"
+        "First acknowledge this directive and send a heartbeat through employee-report. "
+        "Continue only the assigned stage in the exclusive job_root. Do not freeze, rollout, deliver, "
+        "change task identity or invent a Seed approval. If the current candidate is closed/rejected, "
+        "wait for the owner disposition; do not loop idle or send a standby directive. Report blockers and receipts."
+    )
+    admitted = topify_opencode.send_message(employee["job_root"], employee["session_id"], prompt)
+    receipt = {
+        "schema_version": 1, "status": "admitted", "employee_id": employee_id,
+        "session_id": employee["session_id"], "inbox_id": admitted["response"]["data"]["id"],
+        "note": note, "recorded_at": common.utc_now(), "execution_status": "awaiting-heartbeat",
+    }
+    receipt["start_sha256"] = common.canonical_sha256(receipt)
+    _, attempt = common.next_attempt(root / "supervision/start-receipts" / employee_id)
+    common.write_new_json(attempt / "start.json", receipt)
+    _save_employee(root, {**employee, "last_start_receipt": receipt,
+                          "execution_status": "awaiting-heartbeat"})
+    _append(root, "employee_session_resume_admitted", employee_id=employee_id,
+            session_id=employee["session_id"], inbox_id=receipt["inbox_id"],
+            start_sha256=receipt["start_sha256"])
+    return receipt, 0
+
+
+@mutation
+def start_employees(workspace: str | Path, employee_ids: list[str], note: str = "") -> tuple[dict, int]:
+    if not isinstance(employee_ids, list) or not employee_ids:
+        raise common.PipelineError("employee_ids must be a nonempty list")
+    results = []
+    for employee_id in employee_ids:
+        value, code = start_employee(workspace, employee_id, note)
+        results.append({"code": code, **value})
+    return {"status": "admitted", "results": results,
+            "note": "已提交真实绑定 session；员工 heartbeat 到达前不声称 running。"}, 0
+
+
 def _tree(root: Path, employee_id: str) -> list[dict]:
     values = {item["employee_id"]: item for item in _employees(root)}
     if employee_id not in values:
@@ -1127,6 +1179,7 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
             "bound_at": manifest.get("supervisor_session_bound_at"),
         },
         "communication_control": control.state(root),
+        "runtime_capabilities": topify_opencode.runner_capabilities(),
         "owner_requests": control.requests(root),
         "capacity": {
             "active": _active_count(root),

@@ -705,6 +705,15 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 result, code = topify_supervisor.dispatch(context.root, body["employee_id"])
                 self._respond(200 if code == 0 else 409, result)
                 return
+            if parsed.path == "/api/start":
+                body = self._body()
+                auth = self._require("owner", body.get("supervisor_id"))
+                context = self._context(auth, body.get("supervisor_id"))
+                result, code = topify_supervisor.start_employee(
+                    context.root, body["employee_id"], body.get("note", "owner-authorized resume")
+                )
+                self._respond(202 if code == 0 else 409, result)
+                return
             if parsed.path == "/api/fire":
                 body = self._body()
                 auth = self._require(supervisor_id=body.get("supervisor_id"))

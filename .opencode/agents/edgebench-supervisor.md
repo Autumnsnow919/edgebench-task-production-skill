@@ -56,6 +56,14 @@ For a headless supervisor, use the native prompt API to schedule the loop.
 `opencode run` is non-interactive and can cancel question tools automatically;
 do not use it for a supervisor expected to wait for Web owner answers.
 
+Communication-open is not runner-open. For an already bound employee, resume
+its exact session through the OpenCode prompt API or the explicit
+`employee-start`/`employees-start` adapter and wait for its heartbeat. Do not
+use `opencode.list_mcp_resources` as a startup attempt: MCP resource discovery
+cannot launch workers. If the native Task tool/Orca worker-start transport is
+not available, report `runner-unavailable` and leave the employee unchanged;
+never claim that a ledger dispatch or prompt admission started a worker.
+
 QC-1 not passing means repair. After that repair, any QC-2 non-pass/incomplete
 result requires the owner's review; do not automatically fire on QC failure
 count or severity. Show the failed items, exact requirement and evidence,

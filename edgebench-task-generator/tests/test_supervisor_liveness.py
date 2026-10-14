@@ -76,6 +76,21 @@ class SupervisorLivenessTests(unittest.TestCase):
             "请恢复心跳并报告当前阻塞。"
         )
 
+    def test_employee_start_resumes_bound_session_and_waits_for_heartbeat(self):
+        with patch.object(runtime, "employee_runtime", return_value={"status": "idle", "session_id": self.employee_sid, "can_chat": True}), \
+             patch.object(runtime, "send_message", return_value={"status": "sent", "response": {"data": {"id": "msg_start"}}}) as send:
+            value, code = ledger.start_employee(self.campaign, self.employee["employee_id"], "owner authorized continuation")
+        self.assertEqual(code, 0)
+        self.assertEqual(value["status"], "admitted")
+        self.assertEqual(value["execution_status"], "awaiting-heartbeat")
+        send.assert_called_once()
+        self.assertEqual(ledger._employee(self.campaign, self.employee["employee_id"])["employment_status"], "running")
+
+    def test_start_does_not_treat_mcp_resource_listing_as_runner(self):
+        value = runtime.runner_capabilities()
+        self.assertFalse(value["mcp_resource_listing_is_runner"])
+        self.assertTrue(value["prompt_api"])
+
     def test_heartbeat_is_throttled_but_blocked_report_is_delivered(self):
         first = self.heartbeat_file()
         responses = {"data": {"id": "msg_heartbeat"}}
