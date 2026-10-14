@@ -113,6 +113,26 @@ If the owner requests a browser dashboard, read
 The Web console is another view/control plane over the ledger, not a second
 source of truth.
 
+## Public-task-first mode
+
+When the owner asks to start from an open EdgeBench task or its trajectory,
+read `references/public-task-first-production.md`. Pin the official public
+catalog and task-definition bytes, then create an analysis-only inventory:
+
+```bash
+python3 edgebench-task-generator/scripts/topify_pipeline.py \
+  public-task-inventory PUBLIC_TASKS.jsonl \
+  --catalog-revision PUBLIC_CATALOG_REVISION \
+  --output PRIVATE/public-task-inventory.json
+```
+
+Use the public task as a parent baseline: replay controls and inspect its
+feedback, curve and shortcut. A child needs a new task identity and new
+source/input/causal mechanism plus its own r0/r1/r2 evidence. Do not copy a
+public patch, hidden case, task text, public score or trajectory into the child
+as new evidence. Public upstream IDs still drive overlap/contamination review.
+The inventory never promotes a Seed or authorizes rollout.
+
 The owner may invoke the Skill in `rehearsal` mode to test the production line.
 Rehearsal may discover and pin Seeds, run bounded micro-prototypes and verify
 gates, but its files stay outside customer inputs and do not promote a Seed,

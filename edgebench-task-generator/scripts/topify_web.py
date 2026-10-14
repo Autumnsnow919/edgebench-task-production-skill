@@ -195,7 +195,7 @@ class SupervisorContext:
             if now - self._supervisor_tick_at < minimum_interval:
                 return {"status": "throttled"}
             manifest = common.load_json(self.root / "supervision/manifest.json")
-            control_state = topify_control.state(self.root)
+            control_state = control.state(self.root)
             if not control_state["worker_channel_open"]:
                 return {"status": "held-owner", "reason": control_state.get("reason")}
             session_id = manifest.get("supervisor_session_id")
@@ -956,7 +956,10 @@ def serve(
         # only sends evidence-backed alerts to the bound Supervisor; it never
         # fires, resumes or kills a worker.
         while not watch_stop.wait(15.0):
-            state.watch_tick()
+            try:
+                state.watch_tick()
+            except Exception as exc:  # watchdog must not die with the first bad campaign
+                print(json.dumps({"event": "watch-loop-error", "error": str(exc)}, ensure_ascii=False), flush=True)
     watch_thread = threading.Thread(target=watch_loop, name="edgebench-worker-watch", daemon=True)
     watch_thread.start()
     report = {

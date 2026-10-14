@@ -169,6 +169,16 @@ and input bytes, and run the bounded feasibility/learning-loop screen before
 promoting a Seed. Do not invent a Seed from a task title or jump directly to a
 hand-authored task.
 
+For the owner-approved **public-task-first** route, treat the official public
+EdgeBench task set as a pinned parent corpus. Read
+`edgebench-task-generator/references/public-task-first-production.md`, run
+`public-task-inventory` on pinned `tasks.jsonl`, and inspect task definitions,
+controls and public trajectories before proposing a child. A public parent is
+an analysis baseline, not a new Seed or customer evidence. The child must have
+a new task identity and source/input/causal mechanism; never copy public
+patches, hidden cases, task text or trajectory scores. Keep parent hashes and
+new r0/r1/r2 receipts separate. Reject a renamed same-upstream/verifier task.
+
 The session may use these production tools while keeping the main review in
 the current OpenCode conversation:
 

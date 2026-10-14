@@ -43,6 +43,7 @@ import topify_validate
 import topify_supervisor
 import topify_employees
 import topify_web
+import topify_public_tasks
 
 
 def initialize(workspace: Path, request_path: Path) -> dict:
@@ -241,6 +242,11 @@ def parser() -> argparse.ArgumentParser:
     campaign.add_argument("--config", required=True, type=Path)
     campaign_status = commands.add_parser("campaign-status")
     campaign_status.add_argument("workspace", type=Path)
+    public_inventory = commands.add_parser("public-task-inventory", help="pin public EdgeBench task definitions for parent analysis only")
+    public_inventory.add_argument("source", type=Path)
+    public_inventory.add_argument("--output", required=True, type=Path)
+    public_inventory.add_argument("--catalog-revision", required=True)
+    public_inventory.add_argument("--source-url", default="https://huggingface.co/datasets/ByteDance-Seed/EdgeBench")
     supervisor_init = commands.add_parser(
         "supervisor-init", help="initialize the OpenCode/Orca-neutral supervisor ledger"
     )
@@ -742,6 +748,8 @@ def main(argv: list[str] | None = None) -> int:
             report, code = topify_seed.initialize_campaign(args.workspace, args.config), 0
         elif args.command == "campaign-status":
             report, code = topify_seed.campaign_status(args.workspace), 0
+        elif args.command == "public-task-inventory":
+            report, code = topify_public_tasks.inventory(args.source, args.output, args.catalog_revision, args.source_url)
         elif args.command == "supervisor-init":
             report, code = topify_supervisor.initialize(
                 args.workspace, args.mode, args.max_concurrent, args.dedup_root,
