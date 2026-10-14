@@ -73,6 +73,8 @@ class SupervisorContext:
         self._forms_cache = {}
         self._supervisor_runtime_cache = None
         self._forms_lock = threading.Lock()
+        self._supervisor_tick_at = 0.0
+        self._supervisor_tick_lock = threading.Lock()
         self.session_directory = Path(session_directory).resolve() if session_directory else self.root
 
     def describe(self) -> dict:
@@ -185,6 +187,53 @@ class SupervisorContext:
             self._forms_snapshot = snapshot
             self._forms_at = now
             return snapshot
+
+    def supervisor_tick(self, minimum_interval: float = 60.0) -> dict:
+        """Wake an idle bound Supervisor with one real management turn."""
+        now = time.monotonic()
+        with self._supervisor_tick_lock:
+            if now - self._supervisor_tick_at < minimum_interval:
+                return {"status": "throttled"}
+            manifest = common.load_json(self.root / "supervision/manifest.json")
+            control_state = topify_control.state(self.root)
+            if not control_state["worker_channel_open"]:
+                return {"status": "held-owner", "reason": control_state.get("reason")}
+            session_id = manifest.get("supervisor_session_id")
+            if not session_id:
+                return {"status": "unbound"}
+            runtime = topify_opencode.supervisor_runtime(self.session_directory, self.root, manifest)
+            if runtime.get("status") == "running":
+                return {"status": "already-running", "session_id": session_id}
+            try:
+                forms = topify_opencode.pending_forms(self.session_directory, session_id=session_id).get("forms", [])
+            except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
+                return {"status": "question-query-failed", "reason": str(exc)}
+            if forms:
+                return {"status": "waiting-owner-question", "session_id": session_id,
+                        "form_count": len(forms)}
+            prompt = (
+                "Supervisor management heartbeat. This is a real scheduled turn, not a ledger-only event.\n"
+                f"Campaign: {self.root}\n"
+                "Run the focused supervisor dashboard and inspect worker session/report health. "
+                "Process employee heartbeats, watchdog incidents and pending reports. "
+                "If a worker is idle because its candidate is closed, do not send another standby loop; "
+                "submit an owner-request with evidence instead. If an owner decision is needed, call native question and wait. "
+                "Do not freeze, rollout, deliver, fire, replace Seed or close a candidate without current receipts/owner authority. "
+                "Reply with the concrete action taken, evidence path/hash and remaining blocker."
+            )
+            try:
+                admitted = topify_opencode.send_message(self.session_directory, session_id, prompt)
+            except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
+                return {"status": "unconfirmed", "session_id": session_id, "reason": str(exc)}
+            self._supervisor_tick_at = now
+            receipt = {"status": "admitted", "session_id": session_id,
+                       "inbox_id": admitted["response"]["data"]["id"],
+                       "recorded_at": common.utc_now(), "execution_status": "awaiting-agent-action"}
+            receipt["tick_sha256"] = common.canonical_sha256(receipt)
+            number, attempt = common.next_attempt(self.root / "supervision/supervisor-ticks")
+            common.write_new_json(attempt / "tick.json", receipt)
+            topify_supervisor._append(self.root, "supervisor_tick_admitted", **receipt)
+            return receipt
 
     def require_bound_session(self, session_id: str) -> None:
         manifest = common.load_json(self.root / "supervision/manifest.json")
@@ -426,6 +475,8 @@ class ConsoleState:
                 if not gate["worker_channel_open"]:
                     results.append({"supervisor_id": context.supervisor_id, "status": "held-owner"})
                     continue
+                results.append({"supervisor_id": context.supervisor_id,
+                                "supervisor_tick": context.supervisor_tick()})
                 manifest = common.load_json(context.root / "supervision/manifest.json")
                 if not manifest.get("supervisor_session_id"):
                     results.append({"supervisor_id": context.supervisor_id, "status": "unbound-supervisor"})
