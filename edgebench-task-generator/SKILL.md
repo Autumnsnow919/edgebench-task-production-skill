@@ -17,11 +17,13 @@ complete.
 
 ## Hierarchical supervisor mode
 
-Read `references/training-first-qc.md` for the owner-approved review priority:
+Read `references/training-first-qc.md` for the EdgeBench-only review priority:
 semantic correctness, solvability and training usefulness are hard gates;
 rubric granularity and non-core presentation defects may be recorded as
-`accepted` when they do not change the training target. Make the format as
-complete as practical before delivery.
+`accepted` when they do not change the training target. ARM64 validation,
+static checks, build/runtime isolation, NOP/reference scoring and artifact
+contracts remain mandatory and cannot be relaxed. This policy does not apply to
+CritPT, which follows its own vendor brief.
 
 The production Skill supports native OpenCode Task dispatch and headless Orca
 CLI dispatch. The top Agent is a supervisor, not a task author. It hires one

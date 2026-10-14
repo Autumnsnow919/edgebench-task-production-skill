@@ -1,8 +1,9 @@
 # Training-first QC policy
 
-This is the owner policy for authoring review across supported Benchmarks. It
-does not erase a selected customer's required delivery schema; it changes how
-the production team prioritizes findings before that final packaging check.
+This is the owner policy for **EdgeBench review**. It does not apply to CritPT,
+whose separate vendor brief remains authoritative. It does not erase a
+selected customer's required delivery schema; it changes how the EdgeBench
+production team prioritizes non-core findings before final packaging.
 
 ## What blocks a task
 
@@ -23,6 +24,13 @@ training truth:
 
 These are **semantic blockers**. They remain blockers even when the prose,
 rubric or package looks polished.
+
+The following EdgeBench checks are also hard gates and may not be accepted as
+mere polish: native ARM64 validation where required by the current profile,
+static package/QC checks, Work/Judge build and runtime isolation, NOP/reference
+execution, scorer semantics, snapshot/input identity, and the declared
+artifact/feedback contract. A hard-gate failure cannot be waived by saying the
+task is difficult or useful for training.
 
 ## What may be accepted with a note
 
