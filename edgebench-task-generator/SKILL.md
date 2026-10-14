@@ -86,14 +86,23 @@ The production Web console may discover these supervisors from approved scan
 roots. Only a validated `supervision/supervisor-stamp.json` is a recognized
 watermark; arbitrary folders and process names are never auto-enrolled.
 
-Bound employees communicate upward through two mechanisms: their
-`employee-report` heartbeat/completion reports are delivered to the actual
-Supervisor OpenCode session, and the resident Web watchdog detects a missing
-heartbeat or idle bound session after five minutes and sends a consolidated
-watchdog alert to that session. The alert is observational: it never fires or
-replaces an employee. The Supervisor must inspect, contact/resume or escalate
-the worker and record what happened. The Workforce card exposes
-`healthy`/`heartbeat-missed`/`stalled` instead of trusting `employment_status`.
+Bound employees report into the generic Secretary mailbox. The Secretary
+coalesces heartbeat/completion/blocker reports over a bounded interval and
+sends one evidence-linked digest to the actual Supervisor OpenCode session;
+workers must not interrupt the Supervisor one by one. Blocked/failed/question
+reports may trigger an early digest, but still use the same mailbox and
+deduplication path. The resident Web watchdog detects a missing heartbeat or
+idle bound session after five minutes and sends an observational alert through
+the Secretary. It never fires or replaces an employee. The Supervisor must
+inspect, contact/resume or escalate the worker and record what happened. The
+Workforce card exposes `healthy`/`heartbeat-missed`/`stalled` instead of
+trusting `employment_status`.
+
+The live Web surface shows the Supervisor, Secretary status and active
+top-level workers. Child helpers remain inside their parent's detail view.
+Completed, fired, shelved and abandoned work leaves the live queue while its
+immutable receipts remain in audit storage; the Secretary must not reopen it.
+Read `references/supervision.md` for the benchmark-neutral contract.
 
 **Owner control of lifecycle decisions:** candidate closure/shelving, changing
 Seed, producer termination/replacement and standby require prior owner approval.

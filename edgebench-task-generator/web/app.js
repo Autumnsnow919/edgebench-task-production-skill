@@ -126,6 +126,11 @@
       ? `${supervisor.title || '已绑定上司'} · ${supervisor.session_id} · 实际 Agent：${label(supervisor.agent)}`
       : '本批次没有绑定真实上司会话。';
     $('supervisor-note').textContent = `${supervisor.reason || ''} 最近实际活动：${ago(supervisor.updated_at)}。查看不会唤醒；发送消息才会恢复该会话。`;
+    const secretary = value.secretary || {};
+    const secretaryStatus = $('secretary-status');
+    const secretaryNote = $('secretary-note');
+    if (secretaryStatus) secretaryStatus.textContent = `${label(secretary.status)} · 待处理 ${secretary.pending_count ?? 0}`;
+    if (secretaryNote) secretaryNote.textContent = `秘书每 ${secretary.interval_seconds ?? 180} 秒合并一次下属报告；已吸收 ${secretary.consumed_count ?? 0} 条，紧急待处理 ${secretary.pending_urgent_count ?? 0} 条。`;
     const runner=value.runtime_capabilities || {};
     $('runner-capability').textContent = runner.prompt_api
       ? `启动能力：可恢复既有绑定 session（prompt/resume）；${runner.process_launch ? 'CLI runner 可用。' : '进程 runner 不可用。'} MCP 资源列表不等于 runner。`
@@ -168,9 +173,10 @@
     }).join('') || '<div class="empty">当前筛选没有员工；临时 OpenCode 会话不会自动成为出题员工。</div>';
     $('agent-grid').querySelectorAll('[data-employee]').forEach(b => b.addEventListener('click', () => showEmployee(b.dataset.employee)));
   }
-  function renderSessions(snapshot) {
-    const sessions = snapshot.sessions || [];
-    $('session-summary').textContent = snapshot.status === 'unavailable' ? 'OpenCode 运行时不可用' : `全局 · 运行 ${snapshot.active_count ?? 0} 个 · 共 ${sessions.length} 个`;
+   function renderSessions(snapshot) {
+    const allowed = Array.isArray(data?.visible_session_ids) ? new Set(data.visible_session_ids) : null;
+    const sessions = (snapshot.sessions || []).filter(s => !allowed || allowed.has(s.session_id));
+    $('session-summary').textContent = snapshot.status === 'unavailable' ? 'OpenCode 运行时不可用' : `管理范围 · 运行 ${sessions.filter(s => s.status === 'running').length} 个 · 共 ${sessions.length} 个`;
     $('session-grid').innerHTML = sessions.map(s => `<button type="button" class="session-card ${s.status === 'running' ? 'running' : ''}" data-session="${esc(s.session_id)}" title="查看此会话，不会发送消息"><i class="session-dot"></i><div><strong>${esc(s.title)}</strong><small>${esc(label(s.agent))} · ${esc(s.session_id)}${s.parent_id ? ` · 父会话 ${esc(s.parent_id)}` : ''}</small></div><span class="session-badge">${esc(label(s.status))}</span></button>`).join('') || `<div class="empty">${snapshot.status === 'unavailable' ? '无法查询真实会话，请检查 OpenCode 服务。' : '当前扫描范围没有会话。'}</div>`;
     $('session-grid').querySelectorAll('[data-session]').forEach(b => b.addEventListener('click', () => showSession(b.dataset.session)));
   }

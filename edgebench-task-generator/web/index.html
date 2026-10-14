@@ -49,10 +49,14 @@
           <p id="supervisor-note" class="form-hint"></p>
           <p id="runner-capability" class="form-hint"></p>
           <p id="owner-control-status" class="scope-note" role="status">正在读取负责人控制闸门…</p>
-          <p id="owner-control-reason" class="form-hint"></p>
-          <div class="owner-control-actions"><button id="owner-pause" type="button" class="action-button danger">暂停自动沟通并接管上司</button><button id="owner-resume" type="button" class="action-button">恢复上下级通道</button></div>
-          <div id="owner-request-list"></div>
-          <button id="supervisor-inspect" type="button" class="action-button" disabled>查看上司回复与工具调用</button>
+           <p id="owner-control-reason" class="form-hint"></p>
+           <div class="owner-control-actions"><button id="owner-pause" type="button" class="action-button danger">暂停自动沟通并接管上司</button><button id="owner-resume" type="button" class="action-button">恢复上下级通道</button></div>
+           <div id="owner-request-list"></div>
+           <button id="supervisor-inspect" type="button" class="action-button" disabled>查看上司回复与工具调用</button>
+        </section>
+        <section class="panel-surface secretary-panel">
+          <div class="panel-title"><div><p class="overline">中间汇总层</p><h2>秘书收件箱</h2></div><span id="secretary-status" class="status-chip">检测中…</span></div>
+          <p id="secretary-note" class="form-hint">下属报告先进入秘书；秘书按周期合并后才送给上司。</p>
         </section>
         <section id="native-questions" class="panel-surface native-questions-panel">
           <div class="panel-title"><div><p class="overline">Agent 正在等待的原生 question</p><h2>需要你回答的问题</h2></div><span id="native-question-count" class="form-hint">检测中…</span></div>

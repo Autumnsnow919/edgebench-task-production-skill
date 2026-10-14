@@ -237,7 +237,8 @@ class OwnerControlTests(unittest.TestCase):
                 patch.object(ledger, "_deliver_to_supervisor", return_value={"status": "admitted"}) as deliver:
             ledger.watch(self.root, active={})
             second, _ = ledger.watch(self.root, active={self.worker_sid: {}})
-        self.assertEqual(deliver.call_count, 1)
+        self.assertEqual(deliver.call_count, 0)
+        self.assertGreaterEqual(len(list((self.root / "supervision/secretary/inbox").glob("*.json"))), 1)
         self.assertEqual(second["incident_count"], 0)
 
     def test_supervisor_token_cannot_pause_or_resume_owner_gate(self):

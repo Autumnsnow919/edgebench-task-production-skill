@@ -22,6 +22,7 @@ import topify_dedup
 import topify_opencode
 import topify_profile
 import topify_seed
+import topify_secretary
 import topify_validate
 
 
@@ -250,7 +251,7 @@ def _supervision_root(root: Path) -> Path:
     if directory.is_symlink() or directory.exists() and not directory.is_dir():
         raise common.PipelineError("supervision path is unsafe")
     directory.mkdir(exist_ok=True)
-    for name in ("employees", "child-requests", "dispatches", "reports", "decisions", "rollout-gates", "agent-workspaces"):
+    for name in ("employees", "child-requests", "dispatches", "reports", "decisions", "rollout-gates", "agent-workspaces", "secretary"):
         path = directory / name
         if path.is_symlink() or path.exists() and not path.is_dir():
             raise common.PipelineError(f"supervision/{name} path is unsafe")
@@ -1107,12 +1108,18 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
     root, campaign = _root(workspace)
     manifest = _load_manifest(root, campaign)
     values = _employees(root)
+    archived_count = sum(value.get("employment_status") in {"fired", "complete", "shelved", "abandoned"}
+                         for value in values)
     if employee_id is not None:
         selected = _employee(root, employee_id)
         values = [selected]
     rows = []
     alerts = []
     for employee in values:
+        if employee_id is None and employee.get("employment_status") in {"fired", "complete", "shelved", "abandoned"}:
+            # Historical evidence remains on disk, but discarded/completed
+            # work is not part of the live management surface.
+            continue
         tree = _tree(root, employee["employee_id"])
         tree_ids = {item["employee_id"] for item in tree}
         children = [item for item in tree if item["employee_id"] != employee["employee_id"]]
@@ -1187,6 +1194,8 @@ def dashboard(workspace: str | Path, employee_id: str | None = None) -> tuple[di
             "available": max(0, manifest["max_concurrent"] - _active_count(root)),
         },
         "employees": rows,
+        "archived_employee_count": archived_count,
+        "secretary": topify_secretary.status(root),
         "alerts": alerts,
         "owner_action_required": bool(alerts),
     }, 0
@@ -1528,23 +1537,23 @@ def report(workspace: str | Path, employee_id: str, report_file: str | Path) -> 
         **({"hardening_revision": revision, "phase": "authoring" if revision < 2 else "qc-review"}
            if candidate_complete else {"phase": "seed-review"} if seed_proposal else {}),
     }
-    delivery = None
-    if _should_deliver_report(employee, status_value, datetime.now(timezone.utc).timestamp()):
-        delivery_text = (
-            f"Employee {employee_id} report: status={status_value}, phase={updated_employee.get('phase')}, "
-            f"revision={revision}, report_sha256={receipt['report_sha256']}.\n"
-            f"Report path: {receipt['report_path']}\n"
-            f"Summary: {value.get('summary') or 'heartbeat; no summary provided'}\n"
-            "This is a subordinate checkpoint. Acknowledge it, update the stage plan or ask the employee for a blocker. "
-            "Do not treat a completed report as terminal employee completion; preserve the same employee/session."
-        )
-        delivery = _deliver_to_supervisor(root, delivery_text, "employee", employee_id,
-                                          subject=f"employee-report:{employee_id}")
-        updated_employee["last_supervisor_delivery"] = delivery
+    # Reports enter the secretary mailbox first. The secretary periodically
+    # coalesces many worker updates into one bounded digest for the Supervisor.
+    # This prevents a busy batch from interrupting the Supervisor once per
+    # subordinate heartbeat.
+    mailbox_message = topify_secretary.ingest(root, employee, value, receipt)
+    delivery = {
+        "status": "secretary-mailbox" if control.state(root)["worker_channel_open"] else "held-owner",
+        "message_id": mailbox_message["message_id"],
+    }
+    updated_employee["last_secretary_message"] = {
+        "message_id": mailbox_message["message_id"],
+        "recorded_at": mailbox_message["received_at"],
+    }
     _save_employee(root, updated_employee)
     _append(root, "employee_reported", employee_id=employee_id, report_status=status_value,
             report_sha256=receipt["report_sha256"],
-            supervisor_delivery_status=delivery.get("status") if delivery else "throttled")
+            supervisor_delivery_status="secretary-mailbox")
     return {**receipt, "supervisor_delivery": delivery}, 0
 
 
@@ -1590,7 +1599,7 @@ def watch(workspace: str | Path, stale_after_seconds: int = HEARTBEAT_STALE_AFTE
         })
         pointer = watch_root / f"{employee['employee_id']}.json"
         previous = common.load_json(pointer) if pointer.is_file() and not pointer.is_symlink() else {}
-        if previous.get("incident_key") == incident_key and previous.get("status") in {"admitted", "acknowledged"}:
+        if previous.get("incident_key") == incident_key and previous.get("status") in {"admitted", "acknowledged", "secretary-mailbox"}:
             continue
         incident = {
             "schema_version": 1, "incident_key": incident_key,
@@ -1619,8 +1628,14 @@ def watch(workspace: str | Path, stale_after_seconds: int = HEARTBEAT_STALE_AFTE
             f"report_sha256={(incident.get('last_report') or {}).get('report_sha256')} "
             f"reason={health.get('reason')}"
         )
-    delivery = _deliver_to_supervisor(root, "\n".join(lines), "watchdog", "supervisor-watchdog",
-                                      subject="stalled-worker-watch")
+    watchdog_message = topify_secretary.ingest_event(
+        root, "supervisor-watchdog", "blocked", "\n".join(lines),
+        {"incident_count": len(incidents),
+         "incident_keys": [item["incident_key"] for item in incidents]},
+    )
+    channel_open = control.state(root)["worker_channel_open"]
+    delivery = {"status": "secretary-mailbox" if channel_open else "held-owner",
+                "message_id": watchdog_message["message_id"]}
     for incident in incidents:
         incident["status"] = delivery.get("status", "unavailable")
         incident["delivery"] = delivery
@@ -1629,7 +1644,7 @@ def watch(workspace: str | Path, stale_after_seconds: int = HEARTBEAT_STALE_AFTE
                 incident_key=incident["incident_key"], health=incident["health"]["status"],
                 delivery_status=delivery.get("status"), automatic_fire_allowed=False)
     return {"status": delivery.get("status", "unavailable"), "incident_count": len(incidents),
-            "incidents": incidents, "delivery": delivery}, 0 if delivery.get("status") == "admitted" else 2
+            "incidents": incidents, "delivery": delivery}, 0 if delivery.get("status") in {"admitted", "secretary-mailbox"} else 2
 
 
 def _message_target(root: Path, target_type: str, target_id: str) -> Path:

@@ -23,6 +23,7 @@ import topify_common as common
 import topify_control as control
 import topify_opencode
 import topify_registry
+import topify_secretary
 import topify_seed
 import topify_supervisor
 
@@ -121,6 +122,13 @@ class SupervisorContext:
                 runtime = topify_opencode.supervisor_runtime(self.session_directory, self.root, manifest, active)
                 self._supervisor_runtime_cache = (time.monotonic(), binding, runtime)
             value["supervisor_runtime"] = self._supervisor_runtime_cache[2]
+            manifest = common.load_json(self.root / "supervision/manifest.json")
+            visible_sessions = {manifest.get("supervisor_session_id")}
+            visible_sessions.update(
+                employee.get("session_id") for employee in value["employees"]
+                if employee.get("session_id")
+            )
+            value["visible_session_ids"] = sorted(item for item in visible_sessions if item)
             for employee in value["employees"]:
                 health = employee.get("health") or {}
                 if health.get("attention"):
@@ -148,6 +156,22 @@ class SupervisorContext:
             "opencode_sessions": self._opencode_snapshot,
             **value,
         }
+
+    def secretary_tick(self, minimum_interval: int = 180) -> dict:
+        """Flush worker reports through the secretary as one Supervisor digest."""
+        control_state = control.state(self.root)
+        if not control_state["worker_channel_open"]:
+            return {"status": "held-owner", "reason": control_state.get("reason")}
+        try:
+            return topify_secretary.flush(
+                self.root,
+                lambda text, sender, subject: topify_supervisor._deliver_to_supervisor(
+                    self.root, text, sender, "secretary", subject=subject
+                ),
+                interval_seconds=minimum_interval,
+            )
+        except (common.PipelineError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
+            return {"status": "secretary-error", "reason": str(exc)}
 
     def questions(self, session_id=None, employee_id=None, force=False):
         employees = topify_supervisor._employees(self.root)
@@ -475,8 +499,15 @@ class ConsoleState:
                 if not gate["worker_channel_open"]:
                     results.append({"supervisor_id": context.supervisor_id, "status": "held-owner"})
                     continue
+                secretary = context.secretary_tick()
                 results.append({"supervisor_id": context.supervisor_id,
-                                "supervisor_tick": context.supervisor_tick()})
+                                "secretary": secretary})
+                # A secretary digest is already the bounded management turn;
+                # do not immediately add a second Supervisor wake-up for the
+                # same worker reports.
+                if secretary.get("status") != "admitted":
+                    results.append({"supervisor_id": context.supervisor_id,
+                                    "supervisor_tick": context.supervisor_tick(minimum_interval=300.0)})
                 manifest = common.load_json(context.root / "supervision/manifest.json")
                 if not manifest.get("supervisor_session_id"):
                     results.append({"supervisor_id": context.supervisor_id, "status": "unbound-supervisor"})

@@ -48,18 +48,18 @@ class SupervisorLivenessTests(unittest.TestCase):
                                     "summary": summary, "stage": "seed-discovery", "revision_index": 0}))
         return path
 
-    def test_employee_report_admits_update_to_bound_supervisor(self):
+    def test_employee_report_enters_secretary_mailbox_without_waking_supervisor(self):
         report = self.heartbeat_file()
         with patch.object(runtime, "supervisor_runtime", return_value={"can_chat": True, "session_id": self.supervisor_sid}), \
              patch.object(runtime, "send_message", return_value={"status": "sent", "response": {"data": {"id": "msg_heartbeat"}}}) as send:
             value, code = ledger.report(self.campaign, self.employee["employee_id"], report)
         self.assertEqual(code, 0)
-        self.assertEqual(value["supervisor_delivery"]["status"], "admitted")
-        self.assertTrue(send.called)
+        self.assertEqual(value["supervisor_delivery"]["status"], "secretary-mailbox")
+        send.assert_not_called()
         employee = ledger._employee(self.campaign, self.employee["employee_id"])
-        self.assertEqual(employee["last_supervisor_delivery"]["inbox_id"], "msg_heartbeat")
+        self.assertIn("last_secretary_message", employee)
         events = (self.campaign / "supervision/events.jsonl").read_text()
-        self.assertIn("supervisor_update_delivered", events)
+        self.assertIn("employee_reported", events)
 
     def test_supervisor_directive_reaches_employee_actual_session(self):
         with patch.object(runtime, "employee_runtime", return_value={"status": "idle", "session_id": self.employee_sid, "can_chat": True}), \
@@ -91,19 +91,20 @@ class SupervisorLivenessTests(unittest.TestCase):
         self.assertFalse(value["mcp_resource_listing_is_runner"])
         self.assertTrue(value["prompt_api"])
 
-    def test_heartbeat_is_throttled_but_blocked_report_is_delivered(self):
+    def test_reports_are_coalesced_and_blocked_reports_wait_for_secretary_flush(self):
         first = self.heartbeat_file()
         responses = {"data": {"id": "msg_heartbeat"}}
         with patch.object(runtime, "supervisor_runtime", return_value={"can_chat": True, "session_id": self.supervisor_sid}), \
              patch.object(runtime, "send_message", return_value={"status": "sent", "response": responses}) as send:
             ledger.report(self.campaign, self.employee["employee_id"], first)
             ledger.report(self.campaign, self.employee["employee_id"], first)
-        self.assertEqual(send.call_count, 1)
+        self.assertEqual(send.call_count, 0)
         blocked = self.heartbeat_file("blocked", "waiting for an owner-approved source decision")
         with patch.object(runtime, "supervisor_runtime", return_value={"can_chat": True, "session_id": self.supervisor_sid}), \
              patch.object(runtime, "send_message", return_value={"status": "sent", "response": responses}) as send:
             ledger.report(self.campaign, self.employee["employee_id"], blocked)
-        self.assertEqual(send.call_count, 1)
+        self.assertEqual(send.call_count, 0)
+        self.assertGreaterEqual(len(list((self.campaign / "supervision/secretary/inbox").glob("*.json"))), 2)
 
     def test_watch_detects_idle_employee_and_notifies_supervisor_without_firing(self):
         old = {**self.employee, "last_report": {"report_status": "heartbeat",
@@ -116,8 +117,8 @@ class SupervisorLivenessTests(unittest.TestCase):
             value, code = ledger.watch(self.campaign, active={})
         self.assertEqual(code, 0)
         self.assertEqual(value["incident_count"], 1)
-        self.assertEqual(value["status"], "admitted")
-        self.assertEqual(send.call_count, 1)
+        self.assertEqual(value["status"], "secretary-mailbox")
+        self.assertEqual(send.call_count, 0)
         self.assertEqual(ledger._employee(self.campaign, self.employee["employee_id"])["employment_status"], "running")
         watch = common.load_json(self.campaign / "supervision/watch/producer-live.json")
         self.assertEqual(watch["health"]["status"], "stalled")
@@ -132,7 +133,8 @@ class SupervisorLivenessTests(unittest.TestCase):
              patch.object(runtime, "send_message", return_value={"status": "sent", "response": {"data": {"id": "msg_watch"}}}) as send:
             ledger.watch(self.campaign, active={})
             ledger.watch(self.campaign, active={})
-        self.assertEqual(send.call_count, 1)
+        self.assertEqual(send.call_count, 0)
+        self.assertGreaterEqual(len(list((self.campaign / "supervision/secretary/inbox").glob("*.json"))), 1)
 
     def test_health_does_not_call_waiting_owner_phase_stalled(self):
         waiting = {**self.employee, "employment_status": "awaiting-approval",
